@@ -59,12 +59,9 @@ def char_span_to_token_span(token_offsets: List[Tuple[int, int]],
     # the tokens that have the same offsets as our span.
     error = False
     start_index = 0
-    #print(character_span)
-    #print(token_offsets[-1])
     while start_index < len(token_offsets) and token_offsets[start_index][0] < character_span[0]:
         start_index += 1
     # start_index should now be pointing at the span start index.
-    #print(start_index, len(token_offsets))
     if token_offsets[start_index][0] > character_span[0]:
         # In this case, a tokenization or labeling issue made us go too far - the character span
         # we're looking for actually starts in the previous token.  We'll back up one.
@@ -88,7 +85,6 @@ def char_span_to_token_span(token_offsets: List[Tuple[int, int]],
         logger.debug("Bad labelling or tokenization - end offset doesn't match")
     if token_offsets[end_index][1] != character_span[1]:
         error = True
-    #print(start_index, end_index)
     return (start_index, end_index), error
 
 
@@ -179,6 +175,14 @@ def make_reading_comprehension_instance(question_tokens: List[Token],
         associated with each instance, you can pass that in here.  This dictionary will get added
         to the ``metadata`` dictionary we already construct.
     """
+    '''print('qt', question_tokens, type(question_tokens))
+    print('pt', passage_tokens, type(passage_tokens))
+    print('ti', token_indexers, type(token_indexers))
+    print('ptext', type(passage_text))
+    print('ts', token_spans, type(token_spans))
+    print('at', answer_texts, type(answer_texts))
+    print('addm', additional_metadata, type(additional_metadata))
+    print('\n\n\n')'''
     additional_metadata = additional_metadata or {}
     fields: Dict[str, Field] = {}
     passage_offsets = [(token.idx, token.idx + len(token.text)) for token in passage_tokens]
@@ -211,3 +215,4 @@ def make_reading_comprehension_instance(question_tokens: List[Token],
     metadata.update(additional_metadata)
     fields['metadata'] = MetadataField(metadata)
     return Instance(fields)
+

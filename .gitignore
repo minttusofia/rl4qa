@@ -1,9 +1,15 @@
+# WikiHop data
+data
+
+# Search Engine index
+se_index_*.pkl
+
 # Data
 allennlp/squad
 allennlp/glove
 
 # Mac OS X
-.DS_Store
+*/.DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

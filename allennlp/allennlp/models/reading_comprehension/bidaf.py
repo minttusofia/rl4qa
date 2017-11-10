@@ -323,6 +323,7 @@ class BidirectionalAttentionFlow(Model):
                     best_word_span[b, 0] = span_start_argmax[b]
                     best_word_span[b, 1] = j
                     max_span_log_prob[b] = val1 + val2
+        print('bws', best_word_span)
         return best_word_span
 
     @classmethod

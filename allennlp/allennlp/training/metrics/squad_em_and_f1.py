@@ -26,6 +26,8 @@ class SquadEmAndF1(Metric):
         value : ``float``
             The value to average.
         """
+        #print('bss', best_span_string)
+        #print('as', answer_strings)
         exact_match = squad_eval.metric_max_over_ground_truths(
                 squad_eval.exact_match_score,
                 best_span_string,

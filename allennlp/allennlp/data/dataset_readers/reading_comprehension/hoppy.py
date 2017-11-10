@@ -48,9 +48,10 @@ class HoppyReader(DatasetReader):
         logger.info("Reading the dataset")
         instances = []
         i = 0
-        for qa_item in tqdm(dataset[:10]):
+        #print('len of dataset', len(dataset))
+        for qa_item in tqdm(dataset[:100]):
             i += 1
-            print('\n\nQuestion', i)
+            #print('\n\nQuestion', i)
             answer = qa_item['answer']
             paragraphs = ""
             tokenized_paragraphs = []
@@ -79,13 +80,17 @@ class HoppyReader(DatasetReader):
             #if span_end > len(paragraphs):
             #    print(paragraphs, answer)
             instance = self.text_to_instance(qa_item['query'],
-                                             qa_item['supports'],
+                                             paragraphs, #qa_item['supports'],
                                              #(span_start, span_end),
                                              answer,
                                              qa_item['candidates'],
                                              tokenized_paragraphs)
+            '''print('pt', instance.fields['passage'].tokens)
+            print('qt', instance.fields['question'].tokens)
+            print('ss', instance.fields['span_start'].sequence_index)
+            print('se', instance.fields['span_end'].sequence_index)
+            print('meta', instance.fields['metadata'].metadata)'''
             instances.append(instance)
-            break
 
                 #for question_answer in paragraph_json['qas']:
                 #    question_text = question_answer["question"].strip().replace("\n", "")
@@ -96,6 +101,7 @@ class HoppyReader(DatasetReader):
         if not instances:
             raise ConfigurationError("No instances were read from the given filepath {}. "
                                      "Is the path correct?".format(file_path))
+        print('len', len(instances))
         return Dataset(instances)
 
     @overrides
@@ -109,56 +115,34 @@ class HoppyReader(DatasetReader):
         # pylint: disable=arguments-differ
         if not passage_tokens:
             passage_tokens = self._tokenizer.tokenize(passage_text)
-        #print(passage_text[:100])
-        #print(passage_tokens[:10])
-        #char_span = char_span or ()
 
-        '''# We need to convert character indices in `passage_text` to token indices in
-        # `passage_tokens`, as the latter is what we'll actually use for supervision.
         token_spans: List[Tuple[int, int]] = []
-        #print(passage_tokens)
-        passage_offsets = []
-        last_char = 0
-        for token in passage_tokens:
-            passage_offsets.append((last_char, last_char + len(token)))
-            last_char += len(token)
-        #[(token.idx, token.idx + len(token.text)) for token in passage_tokens]
-        print(passage_offsets)
-        #print(passage_offsets, passage_tokens)
-        char_span_start, char_span_end = char_span
-        print(answer_text)
-        (span_start, span_end), error = util.char_span_to_token_span(passage_offsets,
-                                                                     (char_span_start, char_span_end))
-        '''
-        token_spans: List[Tuple[int, int]] = []
+        answer_texts: List[str] = []
+        answer_texts.append(answer_text)
         answer_tokens = self._tokenizer.tokenize(answer_text)
         span_start = -1
         span_end = -1
         #print(answer_tokens)
-        print(passage_tokens[:100])
+        #print(passage_tokens[:100])
         for i in range(len(passage_tokens) - len(answer_tokens) + 1):
             j = 0
-            #print(i+j, len(passage_tokens))
-            #print(j, len(passage_tokens))
             while passage_tokens[i+j].text == answer_tokens[j].text:
-                #print(str(passage_tokens[i+j]), str(answer_tokens[j]),
-                #      str(passage_tokens[i+j]) == str(answer_tokens[j]))
-                print(i+j, j, passage_tokens[i+j], answer_tokens[j], 'match')
-                print(passage_tokens[i:i+len(answer_tokens)], answer_tokens)
+                #print(i+j, j, passage_tokens[i+j], answer_tokens[j], 'match')
+                #print(passage_tokens[i:i+len(answer_tokens)], answer_tokens)
                 j += 1
                 if j == len(answer_tokens):
                     span_start = i
                     span_end = i + len(answer_tokens) - 1  # inclusive range
-                    print('its a match!:', passage_tokens[i:j], answer_tokens)
+                    #print('its a match!:', passage_tokens[span_start:span_end+1], answer_tokens)
                     break
             if span_start != -1:
                 break
         #print(span_start, span_end)
-        if span_start == -1 or span_end == -1:
-            print('not found:', answer_tokens)
+        #if span_start == -1 or span_end == -1:
+        #    print('not found:', answer_tokens)
         #    print(passage_tokens[:50])
         #    print(query_text)
-        print(span_start, span_end)
+        #print(span_start, span_end)
         '''
         if error:
             logger.debug("Passage: %s", passage_text)
@@ -171,15 +155,15 @@ class HoppyReader(DatasetReader):
         if ([t.text for t in passage_tokens[span_start:span_end+1]]
                 != [a.text for a in answer_tokens]):
             print(passage_tokens[span_start:span_end+1], 'doesnt match', answer_tokens)
-        else:
-            print(passage_tokens[span_start:span_end+1], 'matches', answer_tokens)
+        #else:
+        #    print(passage_tokens[span_start:span_end+1], 'matches', answer_tokens)
 
         return util.make_reading_comprehension_instance(self._tokenizer.tokenize(query_text),
                                                         passage_tokens,
                                                         self._token_indexers,
                                                         passage_text,
                                                         token_spans,
-                                                        answer_text,
+                                                        answer_texts,
                                                         additional_metadata=(
                                                             {"candidates": candidates}))
 

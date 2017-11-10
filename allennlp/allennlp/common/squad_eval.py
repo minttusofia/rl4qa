@@ -22,6 +22,9 @@ def normalize_answer(s):
         return ''.join(ch for ch in text if ch not in exclude)
 
     def lower(text):
+        if type(text) != str:
+            print(text)
+            #text = ""
         return text.lower()
 
     return white_space_fix(remove_articles(remove_punc(lower(s))))
@@ -41,6 +44,7 @@ def f1_score(prediction, ground_truth):
 
 
 def exact_match_score(prediction, ground_truth):
+    print(prediction, 'vs', ground_truth)
     return (normalize_answer(prediction) == normalize_answer(ground_truth))
 
 

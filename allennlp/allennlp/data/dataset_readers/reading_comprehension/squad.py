@@ -56,7 +56,7 @@ class SquadReader(DatasetReader):
             dataset = dataset_json['data']
         logger.info("Reading the dataset")
         instances = []
-        for article in tqdm(dataset):
+        for article in tqdm(dataset[:2]):
             for paragraph_json in article['paragraphs']:
                 paragraph = paragraph_json["context"]
                 tokenized_paragraph = self._tokenizer.tokenize(paragraph)
@@ -71,10 +71,16 @@ class SquadReader(DatasetReader):
                                                      zip(span_starts, span_ends),
                                                      answer_texts,
                                                      tokenized_paragraph)
+                    print('pt', instance.fields['passage'].tokens)
+                    print('qt', instance.fields['question'].tokens)
+                    print('ss', instance.fields['span_start'].sequence_index)
+                    print('se', instance.fields['span_end'].sequence_index)
+                    print('meta', instance.fields['metadata'].metadata)
                     instances.append(instance)
         if not instances:
             raise ConfigurationError("No instances were read from the given filepath {}. "
                                      "Is the path correct?".format(file_path))
+        print(instances[0]['answer'])
         return Dataset(instances)
 
     @overrides
@@ -106,6 +112,7 @@ class SquadReader(DatasetReader):
                 logger.debug("Answer: %s", passage_text[char_span_start:char_span_end])
             token_spans.append((span_start, span_end))
 
+        print(type)
         return util.make_reading_comprehension_instance(self._tokenizer.tokenize(question_text),
                                                         passage_tokens,
                                                         self._token_indexers,
