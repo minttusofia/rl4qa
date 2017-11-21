@@ -50,6 +50,8 @@ class SearchEngine:
             self.shape_for_q[q['id']] = data.shape
             sparse = csr_matrix(data)
             self.sparse_for_q[q['id']] = sparse
+        if len(self.data) % 1000 != 0:
+            print(len(self.data), '/', len(self.data))
 
     def rank_docs(self, q_id, search_query, topk=1):
         sparse = self.sparse_for_q[q_id]
@@ -84,7 +86,9 @@ def print_time_taken(prev_t):
 
 if __name__ == '__main__':
     assign_new_ids = False
-    create_new_index = False
+    create_new_index = True
+    use_subset = True
+    subset_size = 1000
     t = time.time()
     print('Loading data...')
     if assign_new_ids:
@@ -100,10 +104,14 @@ if __name__ == '__main__':
         dataset = json.load(open('../data/wikihop/train_ids.json'))
     t = print_time_taken(t)
     print('Initialising search engine...')
+    index_filename = "se_index"
+    if use_subset:
+        dataset = dataset[:subset_size]
+        index_filename += '_' + str(subset_size)
     if create_new_index:
-        se = SearchEngine(dataset, save_index_to_path='se_index')
+        se = SearchEngine(dataset[:1000], save_index_to_path=index_filename)
     else:
-        se = SearchEngine(load_from_path='se_index')
+        se = SearchEngine(load_from_path=index_filename)
     t = print_time_taken(t)
     print('Executing test queries...')
 
