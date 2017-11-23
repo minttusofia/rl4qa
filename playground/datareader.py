@@ -34,7 +34,7 @@ def showRCAnswer(reader, query, doc):
 def playground(automatic_first_query=False):
     index_filename = "se_index"
     use_subset = True
-    subset_size = 1000
+    subset_size = 100
     print('Initialising...')
     file_path = '../data/wikihop/train_ids.json'
     with open(file_path) as dataset_file:

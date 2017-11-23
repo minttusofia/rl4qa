@@ -88,7 +88,7 @@ if __name__ == '__main__':
     assign_new_ids = False
     create_new_index = True
     use_subset = True
-    subset_size = 1000
+    subset_size = 100
     t = time.time()
     print('Loading data...')
     if assign_new_ids:
@@ -109,7 +109,7 @@ if __name__ == '__main__':
         dataset = dataset[:subset_size]
         index_filename += '_' + str(subset_size)
     if create_new_index:
-        se = SearchEngine(dataset[:1000], save_index_to_path=index_filename)
+        se = SearchEngine(dataset[:subset_size], save_index_to_path=index_filename)
     else:
         se = SearchEngine(load_from_path=index_filename)
     t = print_time_taken(t)
