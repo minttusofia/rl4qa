@@ -1,0 +1,2 @@
+model_checkpoint_path: "/media/data2/jtr/squad/fastqa/model_module"
+all_model_checkpoint_paths: "/media/data2/jtr/squad/fastqa/model_module"
