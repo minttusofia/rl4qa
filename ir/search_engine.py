@@ -1,8 +1,28 @@
-import uuid
+"""Defines SearchEngine class, which builds an index for each WikiHop question and ranks its docs.
+
+usage:
+    python -m ir.search_engine
+        Builds a new index consisting of the whole dataset. Also creates train_ids.json with 
+        question->id mappings, and stores the index under './se_index'. If either of these exists,
+        they will be reused and simply the test cases will be executed.
+
+    python -m ir.search_engine --subset_size=100
+        Builds a new index consisting of the first 100 questions.
+
+    python -m ir.search_engine --new_index
+        Override an existing index (of the same size).
+
+    python -m ir.search_engine --new_ids
+        Override an existing question->id allocation.
+"""
+
+import argparse
 import json
+import os
 import numpy as np
 import pickle
 import time
+import uuid
 
 from scipy.sparse import csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -26,6 +46,7 @@ class SearchEngine:
         del queries
         self.build_index()
         if save_index_to_path:
+            print('Writing indices to file...')
             pickle.dump(self.vec_for_q, open(save_index_to_path + '_vec.pkl', 'wb'),
                         pickle.HIGHEST_PROTOCOL)
             print('Written ' + save_index_to_path + '_vec.pkl')
@@ -84,35 +105,22 @@ def print_time_taken(prev_t):
     return new_t
 
 
-if __name__ == '__main__':
-    assign_new_ids = False
-    create_new_index = True
-    use_subset = True
-    subset_size = 100
-    t = time.time()
-    print('Loading data...')
-    if assign_new_ids:
-        with open('../data/wikihop/train.json') as f:
+def load_dataset_with_ids(assign_new_ids, id_filename, t):
+    if assign_new_ids or not os.path.exists(id_filename):
+        with open('./data/wikihop/train.json') as f:
             dataset = json.load(f)
         t = print_time_taken(t)
         print('Assigning new ids...')
         for q in dataset:
             q['id'] = str(uuid.uuid4())
-        with open('../data/wikihop/train_ids.json', 'w') as f:
+        with open(id_filename, 'w') as f:
             json.dump(dataset, f)
     else:
-        dataset = json.load(open('../data/wikihop/train_ids.json'))
-    t = print_time_taken(t)
-    print('Initialising search engine...')
-    index_filename = "se_index"
-    if use_subset:
-        dataset = dataset[:subset_size]
-        index_filename += '_' + str(subset_size)
-    if create_new_index:
-        se = SearchEngine(dataset[:subset_size], save_index_to_path=index_filename)
-    else:
-        se = SearchEngine(load_from_path=index_filename)
-    t = print_time_taken(t)
+        dataset = json.load(open(id_filename))
+    return dataset, t
+
+
+def run_test_queries(se, t):
     print('Executing test queries...')
 
     test_queries = ['games pan american', 'Christian charismatic megachurch Houston Texas',
@@ -126,6 +134,54 @@ if __name__ == '__main__':
     t = print_time_taken(t)
     print('Cleaning up...')
     del se
+    _ = print_time_taken(t)
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--new_index', nargs='?', const=True, default=False,
+                        help='If True, create new index .pkl files (rather than using existing '
+                             'ones).')
+    parser.add_argument('--new_ids', nargs='?', const=True, default=False,
+                        help='If True, assign each question with a new ID (needed to map '
+                             'questions to indices).')
+    parser.add_argument('--subset_size', nargs=1, default=None,
+                        help='If set, use a subset of data for development.')
+    args = parser.parse_args()
+
+    assign_new_ids = args.new_ids
+    create_new_index = args.new_index
+    if assign_new_ids:  # Cannot use previous index if ID's are reassigned
+        create_new_index = True
+    use_subset = False
+    if args.subset_size:
+        if type(args.subset_size) == list:
+            args.subset_size = args.subset_size[0]
+        subset_size = int(args.subset_size)
+        use_subset = True
+
+    t = time.time()
+    print('Loading data...')
+    id_filename = './data/wikihop/train_ids.json'
+    dataset, t = load_dataset_with_ids(assign_new_ids, id_filename, t)
+
     t = print_time_taken(t)
+    print('Initialising search engine...')
+
+    index_dir = './se_index'
+    index_filename = os.path.join(index_dir, 'se_index')
+    if not os.path.exists(index_dir):
+        os.mkdirs(index_dir)
+    if use_subset:
+        dataset = dataset[:subset_size]
+        index_filename += '_' + str(subset_size)
+    if create_new_index or not os.path.exists(index_filename + '_vec.pkl'):
+        se = SearchEngine(dataset, save_index_to_path=index_filename)
+    else:
+        se = SearchEngine(load_from_path=index_filename)
+    t = print_time_taken(t)
+
+    # Test initialised search engine
+    run_test_queries(se, t)
 
 

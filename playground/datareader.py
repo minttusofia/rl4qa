@@ -1,3 +1,5 @@
+"""Allows experimental interaction between data, search engine and reading comprehension module."""
+
 import json
 
 from random import randint
@@ -7,7 +9,8 @@ from playground.nouns import nounPhrases
 from jack import readers
 from jack.core import QASetting
 
-class Question():
+
+class Question:
     def __init__(self, json):
         self.id = json['id']
         self.query = json['query']
