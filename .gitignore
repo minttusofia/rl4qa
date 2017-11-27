@@ -1,8 +1,11 @@
 # WikiHop data
 data
 
+# Pre-extracted nouns
+nouns
+
 # Search Engine index
-se_index_*.pkl
+se_index/*.pkl
 
 # Data
 allennlp/squad

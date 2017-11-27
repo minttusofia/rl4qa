@@ -27,6 +27,8 @@ import uuid
 from scipy.sparse import csr_matrix
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from qa.utils import print_time_taken
+
 
 class SearchEngine:
     def __init__(self, queries=None, save_index_to_path=None, load_from_path=None):
@@ -99,15 +101,9 @@ class SearchEngine:
         return top_ranked
 
 
-def print_time_taken(prev_t):
-    new_t = time.time()
-    print(' ' + str(new_t - prev_t) + ' s')
-    return new_t
-
-
-def load_dataset_with_ids(assign_new_ids, id_filename, t):
+def load_dataset_with_ids(assign_new_ids, id_filename, data_filename, t):
     if assign_new_ids or not os.path.exists(id_filename):
-        with open('./data/wikihop/train.json') as f:
+        with open(data_filename) as f:
             dataset = json.load(f)
         t = print_time_taken(t)
         print('Assigning new ids...')
@@ -159,19 +155,26 @@ if __name__ == '__main__':
             args.subset_size = args.subset_size[0]
         subset_size = int(args.subset_size)
         use_subset = True
+    # Set to an integer k to only include k most frequently occurring question types. Set to None
+    # to include all.
+    k_most_common_relations_only = 6
 
     t = time.time()
     print('Loading data...')
-    id_filename = './data/wikihop/train_ids.json'
-    dataset, t = load_dataset_with_ids(assign_new_ids, id_filename, t)
+    subset_id = ''
+    if k_most_common_relations_only:
+        subset_id = '-' + str(k_most_common_relations_only) + 'mc'
+    data_filename = './data/wikihop/train' + subset_id + '.json'
+    id_filename = './data/wikihop/train_ids' + subset_id + '.json'
+    dataset, t = load_dataset_with_ids(assign_new_ids, id_filename, data_filename, t)
 
     t = print_time_taken(t)
     print('Initialising search engine...')
 
     index_dir = './se_index'
-    index_filename = os.path.join(index_dir, 'se_index')
+    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
     if not os.path.exists(index_dir):
-        os.mkdirs(index_dir)
+        os.makedirs(index_dir)
     if use_subset:
         dataset = dataset[:subset_size]
         index_filename += '_' + str(subset_size)
@@ -181,7 +184,8 @@ if __name__ == '__main__':
         se = SearchEngine(load_from_path=index_filename)
     t = print_time_taken(t)
 
-    # Test initialised search engine
-    run_test_queries(se, t)
+    if not k_most_common_relations_only:
+        # Test initialised search engine
+        run_test_queries(se, t)
 
 

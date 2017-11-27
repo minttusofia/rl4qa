@@ -1,57 +1,44 @@
 """Allows experimental interaction between data, search engine and reading comprehension module."""
 
 import json
-
-from random import randint
-from ir.search_engine import SearchEngine
-from playground.nouns import nounPhrases
+import os
 
 from jack import readers
-from jack.core import QASetting
+from random import randint
 
-
-class Question:
-    def __init__(self, json):
-        self.id = json['id']
-        self.query = json['query']
-        self.answer = json['answer']
-        self.candidates = json['candidates']
-        self.supports = json['supports']
-
-
-def showQuestion(question):
-    print(question.query)
-
-
-def showNouns(doc):
-    print(nounPhrases(doc))
-
-
-def showRCAnswer(reader, query, doc):
-    print('Reading Comprehension answers:')
-    answers = reader([QASetting(question=query, support=[doc])])
-    for a in answers:
-        print(a.text, '\tscore:', a.score)
+from ir.search_engine import SearchEngine
+from rc.utils import show_rc_answer
+from qa.nouns import pre_extract_nouns
+from qa.question import Question
 
 
 def playground(automatic_first_query=False):
-    index_filename = "se_index"
+    subset_id = '-6mc'
+    file_path = './data/wikihop/train_ids' + subset_id + '.json'
+    index_dir = './se_index'
+    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
     use_subset = True
     subset_size = 100
+
     print('Initialising...')
-    file_path = '../data/wikihop/train_ids.json'
     with open(file_path) as dataset_file:
          dataset = json.load(dataset_file)
     if use_subset:
         dataset = dataset[:subset_size]
         index_filename += '_' + str(subset_size)
     se = SearchEngine(dataset, load_from_path=index_filename)
-    reader = readers.reader_from_file("./fastqa_reader")
+
+    print('Extracting nouns...')
+    # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
+    stored_nouns_path = 'nouns/nouns' + subset_id + '_' + str(subset_size) + '.pkl'
+    nouns = pre_extract_nouns(dataset, stored_nouns_path)
+
+    reader = readers.reader_from_file("./rc/fastqa_reader")
 
     while True:
         q_i = randint(0, len(dataset))
         question = Question(dataset[q_i])
-        showQuestion(question)
+        question.show_question()
         read_this_episode = [False for _ in range(len(question.supports))]
         if automatic_first_query:
             first_query = question.replace('_', ' ')
@@ -73,17 +60,22 @@ def playground(automatic_first_query=False):
                 query = input("Query: ")
                 top_idx = se.rank_docs(question.id, query, topk=len(question.supports))#[0]
                 print('Document ranking:', top_idx)
+                # Iterate over ranking backwards (last document is best match)
                 for d in range(len(top_idx)-1, -1, -1):
                     doc = top_idx[d]
                     if read_this_episode[doc]:
-                       print(len(top_idx) - d, ': [READ] ', question.supports[doc])
+                        # Indicate document has been read
+                       print(len(top_idx) - d, '- (doc ' + str(doc) + ') : [READ] ',
+                             question.supports[doc])
                     else:
+                        # Select Best-ranked new document
                         top_idx = doc
                         break
-                print('\n', len(question.supports) - d, ':', question.supports[top_idx], '\n')
+                print('\n', len(question.supports) - d, '- (doc ' + str(doc) + ') :',
+                      question.supports[top_idx], '\n')
                 read_this_episode[top_idx] = True
-                showNouns(question.supports[top_idx])
-                showRCAnswer(reader, query, question.supports[top_idx])
+                print(nouns[question.id][top_idx])
+                show_rc_answer(reader, query, question.supports[top_idx])
 
         cont = input("Continue? (Y/n) ")
         if cont.lower() == 'n':
