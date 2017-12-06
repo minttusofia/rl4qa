@@ -2,9 +2,9 @@
 
 import json
 import os
+import random
 
 from jack import readers
-from random import randint
 
 from ir.search_engine import SearchEngine
 from rc.utils import show_rc_answer
@@ -14,6 +14,8 @@ from qa.question import Question
 
 
 def playground(automatic_first_query=False):
+    # Set random seed to system time
+    random.seed()
     subset_id = '-6mc'
     file_path = './data/wikihop/train_ids' + subset_id + '.json'
     index_dir = './se_index'
@@ -43,7 +45,7 @@ def playground(automatic_first_query=False):
     reader = readers.reader_from_file("./rc/fastqa_reader")
 
     while True:
-        q_i = randint(0, len(dataset))
+        q_i = random.randint(0, len(dataset)-1)
         question = Question(dataset[q_i])
         question.show_question()
         read_this_episode = [False for _ in range(len(question.supports))]
