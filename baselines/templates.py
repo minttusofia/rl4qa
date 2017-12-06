@@ -3,6 +3,7 @@
 import collections
 import json
 import os
+import random
 import time
 
 from jack import readers
@@ -15,10 +16,9 @@ from qa.question import Question
 from qa.utils import print_time_taken
 
 
-
 def eval_single_templates(automatic_first_query=False):
-    '''Evaluates fixed-structure templates which vary in time by the noun passed in as the object.
-    '''
+    """Evaluates fixed-structure templates which vary in time by the noun passed in as the object.
+    """
     # Subset ID and subset size to use as identifiers in index, data, and noun filenames
     subset_id = '-6mc'
     file_path = './data/wikihop/train_ids' + subset_id + '.json'
@@ -64,6 +64,10 @@ def eval_single_templates(automatic_first_query=False):
     max_episode_len = 25
     # Threshold above which to trust the reading comprehension module's answers
     confidence_threshold = 0.25
+    # Whether to penalise answer length
+    penalize_long_answers = True
+    # Make experiments repeatable
+    random.seed(0)
 
     verbose = False
 
@@ -73,12 +77,11 @@ def eval_single_templates(automatic_first_query=False):
             if i != 0:
                 t = print_time_taken(t)
             print('Evaluating question', i, '/', batch_size)
-        q_i = randint(0, len(dataset)-1)
-        question = Question(dataset[q_i])
+        question = Question(dataset[i])
         read_this_episode = [False for _ in range(len(question.supports))]
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
         if verbose:
-            print('\n' + str(q_i), ':', question.query, '(', question.answer, ')')
+            print('\n' + str(i), ':', question.query, '(', question.answer, ')')
 
         if automatic_first_query:
             first_query = question.replace('_', ' ')
@@ -116,7 +119,11 @@ def eval_single_templates(automatic_first_query=False):
             rc_answers = get_rc_answer(reader, query, question.supports[top_idx])
             found_candidate = False
             answer = rc_answers[0]
-            if answer.score > confidence_threshold:
+            score = answer.score
+            if penalize_long_answers and len(answer.text.split()) > 3:
+                # TODO: try more sophisticated discounts
+                score = 3.0/len(answer.text.split()) * score
+            if score > confidence_threshold:
                 prev_subj = answer.text
                 if verbose:
                     print('\t->', prev_subj, '(', answer.score, ')')

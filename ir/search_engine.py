@@ -17,9 +17,10 @@ usage:
 """
 
 import argparse
+import collections
 import json
-import os
 import numpy as np
+import os
 import pickle
 import time
 import uuid
@@ -133,6 +134,14 @@ def run_test_queries(se, t):
     _ = print_time_taken(t)
 
 
+def answer_lengths(data):
+    answer_lengths = collections.defaultdict(int)
+    for j in range(len(data)):
+        length = len(data[j]['answer'].split())
+        answer_lengths[length] += 1
+    return answer_lengths
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--new_index', nargs='?', const=True, default=False,
@@ -158,6 +167,12 @@ if __name__ == '__main__':
     # Set to an integer k to only include k most frequently occurring question types. Set to None
     # to include all.
     k_most_common_relations_only = 6
+
+    # Calculate how many correct answers consist of 1, 2, 3, ... words
+    show_answer_lengths = True
+    if show_answer_lengths:
+        print('Answer length - occurrence map:')
+        print(answer_lengths(json.load(open('./data/wikihop/dev.json'))))
 
     t = time.time()
     print('Loading data...')
