@@ -8,6 +8,7 @@ from random import randint
 
 from ir.search_engine import SearchEngine
 from rc.utils import show_rc_answer
+from qa.nouns import SpacyNounParser, NltkNounParser
 from qa.nouns import pre_extract_nouns
 from qa.question import Question
 
@@ -32,6 +33,12 @@ def playground(automatic_first_query=False):
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     stored_nouns_path = 'nouns/nouns' + subset_id + '_' + str(subset_size) + '.pkl'
     nouns = pre_extract_nouns(dataset, stored_nouns_path)
+
+    debug_noun_extraction = False
+    if debug_noun_extraction:
+        sp_noun_parser = SpacyNounParser()
+        nltk_noun_parser = NltkNounParser()
+
 
     reader = readers.reader_from_file("./rc/fastqa_reader")
 
@@ -75,6 +82,9 @@ def playground(automatic_first_query=False):
                       question.supports[top_idx], '\n')
                 read_this_episode[top_idx] = True
                 print(nouns[question.id][top_idx])
+                if debug_noun_extraction:
+                    print('sp', sp_noun_parser.extract_nouns(question.supports[top_idx]))
+                    print('ntlk', nltk_noun_parser.extract_nouns(question.supports[top_idx]))
                 show_rc_answer(reader, query, question.supports[top_idx])
 
         cont = input("Continue? (Y/n) ")
