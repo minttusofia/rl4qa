@@ -13,6 +13,47 @@ from qa.nouns import pre_extract_nouns
 from qa.question import Question
 
 
+def phrase_appears_in_sentence(phrase, sent):
+    phrase_words = phrase.lower().split()
+    sent_words = sent.lower().split()
+    for s in range(len(sent_words)):
+        if phrase_words[0] == sent_words[s]:
+            for p in range(1, len(phrase_words)):
+                if s + p >= len(sent_words) or phrase_words[p] != sent_words[s + p]:
+                    break
+                elif p == len(phrase_words)-1:
+                    return True
+    return False
+
+
+def show_mentions_of_noun(noun_phrase, supports, already_shown=None, noun_parser=None,
+                          num_indents=0):
+    show_extracted_nouns = False
+    if noun_parser is None:
+        noun_parser = SpacyNounParser()
+    if already_shown is None:
+        already_shown = set()
+    elif noun_phrase.lower() in already_shown:
+        return already_shown
+    already_shown.add(noun_phrase.lower())
+    nouns = []
+    for d in range(len(supports)):
+        sentences = supports[d].split('. ')
+        for s in sentences:
+            if phrase_appears_in_sentence(noun_phrase, s):
+                print('\t' * num_indents, end='')
+                ns = noun_parser.extract_nouns(s)
+                if show_extracted_nouns:
+                    print(d, '---', noun_phrase, '---', s, '::', ns)
+                else:
+                    print(d, '---', noun_phrase, '---')
+                nouns.extend(ns)
+    for n in nouns:
+        already_shown = show_mentions_of_noun(' '.join(n), supports, already_shown, noun_parser,
+                                              num_indents+1)
+    return already_shown
+
+
 def playground(automatic_first_query=False):
     # Set random seed to system time
     random.seed()
@@ -22,6 +63,7 @@ def playground(automatic_first_query=False):
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
     use_subset = True
     subset_size = 100
+    verbose = False
 
     print('Initialising...')
     with open(file_path) as dataset_file:
@@ -41,14 +83,19 @@ def playground(automatic_first_query=False):
         sp_noun_parser = SpacyNounParser()
         nltk_noun_parser = NltkNounParser()
 
-
     reader = readers.reader_from_file("./rc/fastqa_reader")
+    if verbose:
+        #noun_parser = NltkNounParser()
+        noun_parser = SpacyNounParser()
 
     while True:
         q_i = random.randint(0, len(dataset)-1)
         question = Question(dataset[q_i])
         question.show_question()
         read_this_episode = [False for _ in range(len(question.supports))]
+        if verbose:
+            show_mentions_of_noun(' '.join(question.query.split()[1:]), question.supports,
+                                  noun_parser=noun_parser)
         if automatic_first_query:
             first_query = question.replace('_', ' ')
             top_idx = se.rank_docs(question.id, first_query)

@@ -46,7 +46,7 @@ class SpacyNounParser(NounParser):
 
     def extract_nouns(self, sentences):
         doc = self.nlp(sentences)
-        return [str(np.text) for np in doc.noun_chunks]
+        return [[np.text] for np in doc.noun_chunks]
 
 
 def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None):
