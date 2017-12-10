@@ -7,7 +7,7 @@ import random
 from jack import readers
 
 from ir.search_engine import SearchEngine
-from rc.utils import show_rc_answer
+from rc.utils import show_rc_answers
 from qa.nouns import SpacyNounParser, NltkNounParser
 from qa.nouns import pre_extract_nouns
 from qa.question import Question
@@ -134,7 +134,7 @@ def playground(automatic_first_query=False):
                 if debug_noun_extraction:
                     print('sp', sp_noun_parser.extract_nouns(question.supports[top_idx]))
                     print('ntlk', nltk_noun_parser.extract_nouns(question.supports[top_idx]))
-                show_rc_answer(reader, query, question.supports[top_idx])
+                show_rc_answers(reader, query, question.supports[top_idx])
 
         cont = input("Continue? (Y/n) ")
         if cont.lower() == 'n':

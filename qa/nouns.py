@@ -49,23 +49,47 @@ class SpacyNounParser(NounParser):
         return [[np.text] for np in doc.noun_chunks]
 
 
-def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None):
-    if noun_parser_class is None:
-        noun_parser_class = SpacyNounParser
-    parser = noun_parser_class()
+def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
+                      superset_file=None, subset_file=None):
+    # Load existing file for this dataset
     if stored_nouns_path is not None and os.path.exists(stored_nouns_path):
         return pickle.load(open(stored_nouns_path, 'rb'))
-    else:
+    else:  # If file doesn't exist
+        if noun_parser_class is None:
+            noun_parser_class = SpacyNounParser
+        parser = noun_parser_class()
+
+        # Use existing file with superset data
+        if superset_file is not None:
+            superset_nouns = pickle.load(open(superset_file, 'rb'))
+            nouns = collections.defaultdict(list)
+            for item in dataset:
+                if len(superset_nouns[item['id']]) == len(item['supports']):
+                    nouns[item['id']] = superset_nouns[item['id']]
+                else:
+                    # If question is missing or partially filled
+                    for doc in item['supports']:
+                        nouns[item['id']].append(parser.extract_nouns(doc))
+            return nouns
+
         nouns = collections.defaultdict(list)
+        # Start from a file with subset data
+        if subset_file is not None:
+            subset_nouns = pickle.load(open(subset_file, 'rb'))
+
         t = time.time()
         for i in range(len(dataset)):
             item = dataset[i]
-            for doc in item['supports']:
-                nouns[item['id']].append(parser.extract_nouns(doc))
+            # If entry for item exists in subset file
+            if subset_file is not None and len(subset_nouns[item['id']]) == len(item['supports']):
+                nouns[item['id']] = subset_nouns[item['id']]
+            else:
+                for doc in item['supports']:
+                    nouns[item['id']].append(parser.extract_nouns(doc))
             if (i + 1) % 10 == 0:
                 print(i + 1, '/', len(dataset), end='\t')
                 t = print_time_taken(t)
-            # TODO: regularly append results to file
+                # TODO: regularly append results to file
 
         if stored_nouns_path is not None:
             if not os.path.exists(os.path.dirname(stored_nouns_path)):
