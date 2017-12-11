@@ -236,11 +236,11 @@ def eval_templates():
     # Subset ID and subset size to use as identifiers in index, data, and noun filenames
     if args.subset_size is not None:
         subset_size = int(args.subset_size[0])
+    use_subset = args.subset_size is not None
     subset_id = '-6mc'
     file_path = './data/wikihop/train_ids' + subset_id + '.json'
     index_dir = './se_index'
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
-    use_subset = subset_size is not None
     stored_nouns_path = 'nouns/nouns' + subset_id
     if use_ntlk:
         stored_nouns_path += '-nltk'

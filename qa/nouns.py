@@ -77,6 +77,8 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
         if subset_file is not None:
             subset_nouns = pickle.load(open(subset_file, 'rb'))
 
+        print('Noun extraction format:', parser.extract_nouns(dataset[0]['supports'][0]))
+
         t = time.time()
         for i in range(len(dataset)):
             item = dataset[i]
@@ -89,7 +91,10 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
             if (i + 1) % 10 == 0:
                 print(i + 1, '/', len(dataset), end='\t')
                 t = print_time_taken(t)
-                # TODO: regularly append results to file
+            if (i + 1) % 100 == 0:
+                pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
+                nouns = collections.defaultdict(list)
+                print('Saved to', stored_nouns_path)
 
         if stored_nouns_path is not None:
             if not os.path.exists(os.path.dirname(stored_nouns_path)):
