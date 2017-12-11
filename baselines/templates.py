@@ -65,9 +65,9 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader, num_
                 # random
                 if not top_doc_found:
                     top_idx = top_idxs[-1]
-                    prev_subj = ' '.join((nouns[question.id]
-                                               [top_idx]
-                                               [randint(0, len(nouns[question.id][top_idx])-1)]))
+                    prev_subj = (nouns[question.id]
+                                      [top_idx]
+                                      [randint(0, len(nouns[question.id][top_idx])-1)])
             queries_asked[query].append(top_idx)
             if verbose:
                 print(query, '\n\t->', top_idx)
@@ -102,7 +102,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader, num_
             if not found_candidate:
                 # Pick a noun phrase at random from top document
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
-                prev_subj = ' '.join(nouns[question.id][top_idx][rand_draw]).lower()
+                prev_subj = nouns[question.id][top_idx][rand_draw].lower()
 
     return correct_answers, incorrect_answers
 
@@ -234,12 +234,16 @@ def eval_templates():
     use_ntlk = args.nltk
     parallel_eval = args.parallel
     # Subset ID and subset size to use as identifiers in index, data, and noun filenames
-    subset_size = int(args.subset_size[0])
+    if args.subset_size is not None:
+        subset_size = int(args.subset_size[0])
     subset_id = '-6mc'
     file_path = './data/wikihop/train_ids' + subset_id + '.json'
     index_dir = './se_index'
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
     use_subset = subset_size is not None
+    stored_nouns_path = 'nouns/nouns' + subset_id
+    if use_ntlk:
+        stored_nouns_path += '-nltk'
 
     templates = {'instance_of': 'what is',
                  'located_in_the_administrative_territorial_entity': 'where is',
@@ -254,6 +258,7 @@ def eval_templates():
     if use_subset:
         dataset = dataset[:subset_size]
         index_filename += '_' + str(subset_size)
+        stored_nouns_path += '_' + str(subset_size)
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
     if use_ntlk:
@@ -263,12 +268,9 @@ def eval_templates():
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
-    stored_nouns_path = 'nouns/nouns' + subset_id + '_' + str(subset_size) + '.pkl'
-    if noun_parser_class == NltkNounParser:
-        stored_nouns_path = 'nouns/nouns' + subset_id + '-nltk_' + str(subset_size) + '.pkl'
-    nouns = pre_extract_nouns(dataset, stored_nouns_path, noun_parser_class=noun_parser_class)#,
-    # reuse_from_file='./nouns/nouns-6mc.pkl')
-
+    nouns = pre_extract_nouns(dataset, stored_nouns_path + '.pkl',
+                              noun_parser_class=noun_parser_class,
+                              subset_file='nouns/nouns-6mc-nltk_1000.pkl')
     reader = readers.reader_from_file('./rc/fastqa_reader')
 
     # Number of instances to test (<= subset size)

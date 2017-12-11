@@ -34,7 +34,7 @@ class NltkNounParser(NounParser):
         for s in sentences:
             p = self.cp.parse(s)
             for part in p.subtrees(filter=lambda x: x.label() == "NP"):
-                nouns.append([x[0] for x in part.leaves()])
+                nouns.append(' '.join(x[0] for x in part.leaves()))
         return nouns
 
 
@@ -46,7 +46,7 @@ class SpacyNounParser(NounParser):
 
     def extract_nouns(self, sentences):
         doc = self.nlp(sentences)
-        return [[np.text] for np in doc.noun_chunks]
+        return [np.text for np in doc.noun_chunks]
 
 
 def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
