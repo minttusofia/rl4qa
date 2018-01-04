@@ -1,6 +1,7 @@
 """Allows experimental interaction between data, search engine and reading comprehension module."""
 
 import argparse
+import collections
 import json
 import os
 import random
@@ -36,14 +37,18 @@ def show_mentions_of_noun(noun_phrase, supports, already_shown=None, noun_parser
             if phrase_appears_in_doc(noun_phrase, s):
                 found_exact_phrase = True
                 print('\t' * num_indents, end='')
+                # Extract nouns for a single sentence only
                 ns = noun_parser.extract_nouns(s)
                 if show_extracted_nouns:
                     print(d, '---', color(noun_phrase, fg='green'), '---', s, '::', ns, end=' ')
                 else:
                     print(d, '---', color(noun_phrase, fg='green'), '---', end=' ')
+
+                # Print a single sentence instead of a whole doc
                 print_colored_doc(s, query=noun_phrase + ' ' + extra_words_to_highlight, nouns=ns)
                 #print_colored_doc(supports[d], query=noun_phrase + ' ' + extra_words_to_highlight)
                 nouns.extend(ns)
+
     if not found_exact_phrase:
         for word in noun_phrase:
             already_shown = show_mentions_of_noun(word, supports, already_shown,
@@ -55,12 +60,62 @@ def show_mentions_of_noun(noun_phrase, supports, already_shown=None, noun_parser
     return already_shown
 
 
+def populate_outgoing_connections(all_sentences, nouns, noun, connections, noun_set, already_added):
+    for d in range(len(all_sentences)):
+        for s in range(len(all_sentences[d])):
+            sent = all_sentences[d][s]
+            if phrase_appears_in_doc(noun, sent):
+                for n in nouns[d][s]:
+                    if n not in already_added and noun != n:
+                        connections[(noun, n)].add((d, s))
+                        noun_set.add(n)
+
+
+def show_connections_to_correct_answer(question, noun_parser):
+    """Print out chains from question subject to correct answer.
+
+    e.g. subject : d0 -> n1 : d1 -> n2 : d2 -> n3 : d3 -> answer
+    """
+    subject = ' '.join(question.query.split()[1:])
+    answer = question.answer
+    # TODO: consider non-contiguous mentions of subject (e.g. firstname middlename lastname)
+    # Assume nouns have to appear in same sentence
+    all_sentences = []
+    print('Showing connections from', subject, 'to', answer)
+    nouns = [[] for _ in range(len(question.supports))]
+    for d in range(len(question.supports)):
+        doc = question.supports[d]
+        sentences = doc.split('. ')
+        all_sentences.append(sentences)
+        for sent in sentences:
+            # Extract nouns for a single sentence only
+            nouns[d].append([w.lower() for w in noun_parser.extract_nouns(sent)])
+            if answer in nouns[d][-1]:
+                print('\nfound anwer', answer, '\n')
+        if answer in doc:
+            print('\n', doc, '\ncontains', answer)
+    connections = collections.defaultdict(set)
+    remaining_set = set()
+    already_added = set()
+    populate_outgoing_connections(all_sentences, nouns, subject, connections, remaining_set,
+                                  already_added)
+    while not len(remaining_set) == 0:
+        noun = remaining_set.pop()
+        if noun != subject:
+            populate_outgoing_connections(all_sentences, nouns, noun, connections, remaining_set,
+                                          already_added)
+        already_added.add(noun)
+    print(connections)
+
+
 def playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
                     debug_noun_extraction=False, sp_noun_parser=None, nltk_noun_parser=None,
-                    automatic_first_query=False):
+                    automatic_first_query=False, allow_multiple_reads=False):
     while True:  # Loop forever and pick questions at random
-        q_i = 0#random.randint(0, len(dataset)-1)
+        q_i = random.randint(0, len(dataset)-1)
         question = Question(dataset[q_i])
+        #show_connections_to_correct_answer(question, noun_parser)
+        print(q_i, end=' - ')
         question.show_question()
         read_this_episode = [False for _ in range(len(question.supports))]
         if verbose:
@@ -87,18 +142,23 @@ def playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
                 top_idx = search_engine.rank_docs(question.id, query, topk=len(question.supports))
                 print('Document ranking:', top_idx)
                 # Iterate over ranking backwards (last document is best match)
-                for d in range(len(top_idx)-1, -1, -1):
-                    doc = top_idx[d]
-                    if read_this_episode[doc]:
-                        # Indicate document has been read
-                        print(len(top_idx) - d, '- (doc ' + str(doc) + ') : [READ] ',
-                              question.supports[doc])
-                    else:
-                        # Select Best-ranked new document
-                        top_idx = doc
-                        break
-                print('\n', len(question.supports) - d, '- (doc ' + str(doc) + ') :')
-                print_colored_doc(question.supports[top_idx], query, nouns[question.id][top_idxq])
+                if allow_multiple_reads:
+                    top_idx = top_idx[-1]
+                    doc = top_idx
+                    print('\n', 1, '- (doc ' + str(top_idx) + ') :')
+                else:
+                    for d in range(len(top_idx)-1, -1, -1):
+                        doc = top_idx[d]
+                        if read_this_episode[doc]:
+                            # Indicate document has been read
+                            print(len(top_idx) - d, '- (doc ' + str(doc) + ') : [READ] ',
+                                  question.supports[doc])
+                        else:
+                            # Select Best-ranked new document
+                            top_idx = doc
+                            break
+                    print('\n', len(question.supports) - d, '- (doc ' + str(doc) + ') :')
+                print_colored_doc(question.supports[top_idx], query, nouns[question.id][top_idx])
                 print()
                 read_this_episode[top_idx] = True
                 print(nouns[question.id][top_idx])
@@ -128,7 +188,9 @@ def playground_setup():
 
     use_ntlk = args.nltk
     # Subset ID and subset size to use as identifiers in index, data, and noun filenames
-    subset_size = int(args.subset_size[0])
+    subset_size = args.subset_size
+    if type(subset_size) == list:
+        subset_size = int(subset_size[0])
     subset_id = '-6mc'
     file_path = './data/wikihop/train_ids' + subset_id + '.json'
     index_dir = './se_index'
@@ -136,6 +198,7 @@ def playground_setup():
     use_subset = subset_size is not None
     verbose = args.verbose
     debug_noun_extraction = args.debug_noun_extraction
+    allow_multiple_reads = True
 
     print('Initialising...')
     with open(file_path) as dataset_file:
@@ -169,7 +232,8 @@ def playground_setup():
     reader = readers.reader_from_file("./rc/fastqa_reader")
     # Playground main loop
     playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
-                    debug_noun_extraction, sp_noun_parser, nltk_noun_parser)
+                    debug_noun_extraction, sp_noun_parser, nltk_noun_parser,
+                    allow_multiple_reads=allow_multiple_reads)
     print('Freeing memory...')
 
 
