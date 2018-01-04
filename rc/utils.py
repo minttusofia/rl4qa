@@ -1,4 +1,8 @@
+import pickle
+import time
+
 from jack.core import QASetting
+from jack.core.data_structures import Answer
 
 
 def get_rc_answers(reader, queries, documents):
@@ -8,6 +12,47 @@ def get_rc_answers(reader, queries, documents):
     for q in range(len(queries)):
         questions.append(QASetting(question=queries[q], support=[documents[q]]))
     answers = reader(questions)
+    return answers
+
+
+def get_cached_rc_answers(reader, queries, documents, redis_server):
+    t = time.time()
+    used_cache = False
+    if type(queries) != list:
+        answer = redis_server.get(pickle.dumps((queries, documents)))
+        if answer is None or type(pickle.loads(answer)) is not tuple:
+            answer = get_rc_answers(reader, queries, documents)
+            redis_server.set(pickle.dumps((queries, documents)),
+                             pickle.dumps((answer[0].text, answer[0].score)))
+        else:
+            answer = pickle.loads(answer)
+            answer = [Answer(text=answer[0], score=answer[1])]
+            used_cache = True
+
+        return list(answer), used_cache
+
+    unanswered_queries = queries
+    unanswered_documents = documents
+    answers = [None for _ in range(len(queries))]
+    for q in range(len(queries)):
+        answer = redis_server.get(pickle.dumps((queries[q], documents[q])))
+        if answer is not None:
+            print('answer found in cache')
+            answers[q] = answer
+            unanswered_queries[q] = None
+            unanswered_documents[q] = None
+    answers_to_compute = get_rc_answers(reader,
+                                        [q for q in unanswered_queries if q is not None],
+                                        [d for d in unanswered_documents if d is not None])
+    a_i = 0
+    for a in range(len(answers)):
+        if answers[a] is None:
+            print('answer not found in cache')
+            answers[a] = answers_to_compute[a_i]
+            redis_server.set(pickle.dumps((queries[a], documents[a])),
+                             pickle.dumps(answers[a].text, answers[a].score))
+            a_i += 1
+    print(time.time() - t)
     return answers
 
 
