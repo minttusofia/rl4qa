@@ -172,7 +172,7 @@ if __name__ == '__main__':
     show_answer_lengths = True
     if show_answer_lengths:
         print('Answer length - occurrence map:')
-        print(answer_lengths(json.load(open('./data/wikihop/dev.json'))))
+        print(answer_lengths(json.load(open('./data/wikihop/train.json'))))
 
     t = time.time()
     print('Loading data...')
