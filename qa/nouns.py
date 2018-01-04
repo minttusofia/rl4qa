@@ -55,6 +55,7 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
     if stored_nouns_path is not None and os.path.exists(stored_nouns_path):
         return pickle.load(open(stored_nouns_path, 'rb'))
     else:  # If file doesn't exist
+        print('Calling pre extract nouns with', stored_nouns_path)
         if noun_parser_class is None:
             noun_parser_class = SpacyNounParser
         parser = noun_parser_class()
@@ -79,6 +80,10 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
 
         print('Noun extraction format:', parser.extract_nouns(dataset[0]['supports'][0]))
 
+        if stored_nouns_path is not None:
+            if not os.path.exists(os.path.dirname(stored_nouns_path)):
+                os.makedirs(os.path.dirname(stored_nouns_path))
+
         t = time.time()
         for i in range(len(dataset)):
             item = dataset[i]
@@ -92,15 +97,13 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
                 print(i + 1, '/', len(dataset), end='\t')
                 t = print_time_taken(t)
             if (i + 1) % 100 == 0:
+                # Append to file regularly for improved fault tolerance
                 pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
                 nouns = collections.defaultdict(list)
                 print('Saved to', stored_nouns_path)
 
-        if stored_nouns_path is not None:
-            if not os.path.exists(os.path.dirname(stored_nouns_path)):
-                os.makedirs(os.path.dirname(stored_nouns_path))
-
-            pickle.dump(nouns, open(stored_nouns_path, 'wb', pickle.HIGHEST_PROTOCOL))
+        # Append remaining nouns to file
+        pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
         return nouns
 
 
