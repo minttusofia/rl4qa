@@ -154,9 +154,9 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                         correct_answers[query_type] += 1
                         break
                     # If the current answer is not correct and we have not submitted it before
-                    elif answer.text not in incorrect_answers_this_episode:
+                    elif answer.text.lower() not in incorrect_answers_this_episode:
                         print(i, ': Found incorrect answer candidate', answer.text)
-                        incorrect_answers_this_episode.append(answer.text)
+                        incorrect_answers_this_episode.append(answer.text.lower())
                         if not seen_incorrect_answer_this_episode:
                             incorrect_answers[query_type] += 1
                             seen_incorrect_answer_this_episode = True
