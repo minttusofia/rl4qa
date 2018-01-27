@@ -8,12 +8,10 @@ usage:
 
     python -m ir.search_engine --subset_size=100
         Builds a new index consisting of the first 100 questions.
+        
+    python -m ir.search_engine --k_most_common_only=5
+        Builds a new index consisting of the 5 most commonly occurring relation types only.
 
-    python -m ir.search_engine --new_index
-        Override an existing index (of the same size).
-
-    python -m ir.search_engine --new_ids
-        Override an existing question->id allocation.
 """
 
 import argparse
@@ -102,22 +100,21 @@ class SearchEngine:
         return top_ranked
 
 
-def load_dataset_with_ids(assign_new_ids, id_filename, data_filename, t):
-    if assign_new_ids or not os.path.exists(id_filename):
-        with open(data_filename) as f:
-            dataset = json.load(f)
-        t = print_time_taken(t)
-        print('Assigning new ids...')
-        for q in dataset:
-            q['id'] = str(uuid.uuid4())
-        with open(id_filename, 'w') as f:
-            json.dump(dataset, f)
-    else:
-        dataset = json.load(open(id_filename))
-    return dataset, t
+def create_full_id_map(base_filename):
+    t = time.time()
+    data_filename = base_filename + '.json'
+    id_filename = base_filename + '_ids.json'
+    with open(data_filename) as f:
+        dataset = json.load(f)
+    _ = print_time_taken(t)
+    print('Assigning new ids...')
+    for q in dataset:
+        q['id'] = str(uuid.uuid4())
+    with open(id_filename, 'w') as f:
+        json.dump(dataset, f)
 
 
-def run_test_queries(se, t):
+def run_test_queries(search_engine, t):
     print('Executing test queries...')
 
     test_queries = ['games pan american', 'Christian charismatic megachurch Houston Texas',
@@ -125,13 +122,33 @@ def run_test_queries(se, t):
     test_instances = [0, 1, 2]
     expected_doc = [1, 1, 14]
     for i in range(len(test_instances)):
-        ranked = se.rank_docs(dataset[test_instances[i]]['id'], test_queries[i])
+        ranked = search_engine.rank_docs(dataset[test_instances[i]]['id'], test_queries[i])
         print(i, ranked, dataset[test_instances[i]]['supports'][ranked[0]][:60] + "...")
         assert ranked[0] == expected_doc[i]
     t = print_time_taken(t)
     print('Cleaning up...')
-    del se
+    del search_engine
     _ = print_time_taken(t)
+
+
+def filter_by_most_common(k_most_common_only):
+    most_common_relations = ['instance_of',
+                             'located_in_the_administrative_territorial_entity',
+                             'occupation',
+                             'place_of_birth',
+                             'record_label',
+                             'genre',
+                             'country_of_citizenship',
+                             'parent_taxon',
+                             'place_of_death',
+                             'inception',
+                             'date_of_birth',
+                             'country',
+                             'headquarters_location']
+    included_relations = most_common_relations[:k_most_common_only]
+
+    dataset[:] = [x for x in dataset if x['query'].split()[0] in included_relations]
+    return dataset
 
 
 def answer_lengths(data):
@@ -144,62 +161,59 @@ def answer_lengths(data):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--new_index', nargs='?', const=True, default=False,
-                        help='If True, create new index .pkl files (rather than using existing '
-                             'ones).')
-    parser.add_argument('--new_ids', nargs='?', const=True, default=False,
-                        help='If True, assign each question with a new ID (needed to map '
-                             'questions to indices).')
-    parser.add_argument('--subset_size', nargs=1, default=None,
+    parser.add_argument('--subset_size', type=int, default=None,
                         help='If set, use a subset of data for development.')
+    parser.add_argument('--k_most_common_only', type=int, default=None,
+                        help='If set, only include the k most commonly occurring relation types.')
+    parser.add_argument('--wikihop_version', type=str, default='1.1',
+                        help='WikiHop version to use: one of {0, 1.1}.')
+    parser.add_argument('--dev', nargs='?', const=True, default=False,
+                        help='If True, build an index on dev data instead of train.')
     args = parser.parse_args()
 
-    assign_new_ids = args.new_ids
-    create_new_index = args.new_index
-    if assign_new_ids:  # Cannot use previous index if ID's are reassigned
-        create_new_index = True
-    use_subset = False
-    if args.subset_size:
-        if type(args.subset_size) == list:
-            args.subset_size = args.subset_size[0]
-        subset_size = int(args.subset_size)
-        use_subset = True
-    # Set to an integer k to only include k most frequently occurring question types. Set to None
-    # to include all.
-    k_most_common_relations_only = 6
+    base_filename = './data/wikihop/v' + args.wikihop_version + '/'
+    if args.dev:
+        base_filename += 'dev'
+    else:
+        base_filename += 'train'
 
     # Calculate how many correct answers consist of 1, 2, 3, ... words
-    show_answer_lengths = True
+    show_answer_lengths = False
     if show_answer_lengths:
         print('Answer length - occurrence map:')
-        print(answer_lengths(json.load(open('./data/wikihop/train.json'))))
+        print(answer_lengths(json.load(open(base_filename + '.json'))))
 
     t = time.time()
     print('Loading data...')
-    subset_id = ''
-    if k_most_common_relations_only:
-        subset_id = '-' + str(k_most_common_relations_only) + 'mc'
-    data_filename = './data/wikihop/train' + subset_id + '.json'
-    id_filename = './data/wikihop/train_ids' + subset_id + '.json'
-    dataset, t = load_dataset_with_ids(assign_new_ids, id_filename, data_filename, t)
+    # Ensure consistent IDs are used between subsets
+    id_filename = base_filename + '_ids.json'
+    if not os.path.exists(id_filename):
+        create_full_id_map(base_filename)
+
+    dataset = json.load(open(id_filename))
 
     t = print_time_taken(t)
     print('Initialising search engine...')
 
-    index_dir = './se_index'
-    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
+    index_dir = './se_index/v' + args.wikihop_version
+    index_filename = os.path.join(index_dir, 'se_index')
+    if args.k_most_common_only:
+        dataset = filter_by_most_common(args.k_most_common_only)
+        index_filename += '-' + str(args.k_most_common_only) + 'mc'
+    if args.subset_size:
+        dataset = dataset[:args.subset_size]
+        index_filename += '_' + str(args.subset_size)
+
     if not os.path.exists(index_dir):
         os.makedirs(index_dir)
-    if use_subset:
-        dataset = dataset[:subset_size]
-        index_filename += '_' + str(subset_size)
-    if create_new_index or not os.path.exists(index_filename + '_vec.pkl'):
+    if not os.path.exists(index_filename + '_vec.pkl'):
+        # Create an index
         se = SearchEngine(dataset, save_index_to_path=index_filename)
     else:
         se = SearchEngine(load_from_path=index_filename)
     t = print_time_taken(t)
 
-    if not k_most_common_relations_only:
+    if not args.k_most_common_only:
         # Test initialised search engine
         run_test_queries(se, t)
 

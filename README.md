@@ -16,16 +16,17 @@ documents for that question. The index is kept in memory.
 
 ##### Playground
 1. Install jack (https://github.com/uclmr/jack).
-2. Place WikiHop (train.json, dev.json, test.json) to `/data/wikihop`.
+2. Place WikiHop (train.json, dev.json) under `/data/wikihop/v1.1/`.
 3. Create an index by running `python -m ir.search_engine` from the top 
 level directory (this will take a while). Optionally, to only use a subset of data for faster 
 development, add 
-`--subset_size` followed by the desired size (e.g. `100`, or 100 questions).
+`--subset_size` followed by the desired size (e.g. `100` for 100 questions), or 
+`--k_most_common_only` to only include the k (e.g. `5`) most common WikiHop relation types.
 4. Run `python -m playground.datareader` from the top level directory to start interacting with 
-the data. Use the subset size from step 3.
+the data. Use the subset flags from step 3.
 
 ##### Templates
 1. See steps 1 - 3 under _Playground_ for setup. Build the index with
-`k_most_common_relations_only = 6` (or less), as only these types have templates for now.
+`k_most_common_only=6` (or less), as only these types have templates for now.
 2. Run `python -m baselines.templates` from the top level directory to evaluate the template 
 baseline on the data.
