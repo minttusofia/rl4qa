@@ -17,9 +17,11 @@ usage:
 import argparse
 import collections
 import json
+import nltk
 import numpy as np
 import os
 import pickle
+import regex
 import time
 import uuid
 
@@ -106,10 +108,27 @@ def create_full_id_map(base_filename):
     id_filename = base_filename + '_ids.json'
     with open(data_filename) as f:
         dataset = json.load(f)
-    _ = print_time_taken(t)
+    t = print_time_taken(t)
+    tokenizer = nltk.tokenize.TreebankWordTokenizer()
     print('Assigning new ids...')
     for q in dataset:
-        q['id'] = str(uuid.uuid4())
+        if 'id' not in q:  # v1.1 has preassigned IDs
+            q['id'] = str(uuid.uuid4())
+    t = print_time_taken(t)
+    print('Tokenizing documents...')
+    # Tokenize support documents properly before building TF-IDF
+    r = regex.compile(r'\w+\. ')
+    for i in range(len(dataset)):
+        q = dataset[i]
+        for d in range(len(q['supports'])):
+            q['supports'][d] = ' '.join(tokenizer.tokenize(q['supports'][d]))
+            periods_not_tokenized = regex.findall(r, q['supports'][d])
+            for match in periods_not_tokenized:
+                q['supports'][d] = q['supports'][d].replace(match, match[:-2] + ' . ')
+        if (i+1) % 1000 == 0:
+            print(i+1, '/', len(dataset), end='\t')
+            t = print_time_taken(t)
+
     with open(id_filename, 'w') as f:
         json.dump(dataset, f)
 
