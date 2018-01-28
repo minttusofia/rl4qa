@@ -172,6 +172,31 @@ def playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
             break
 
 
+def format_paths(args):
+    base_filename = './data/wikihop/v' + args.wikihop_version + '/'
+    if args.dev:
+        base_filename += 'dev'
+    else:
+        base_filename += 'train'
+    data_path = base_filename + '_ids'
+    subset_id = ''
+    if args.k_most_common_only:
+        subset_id = '-6mc'
+        data_path += '-' + args.k_most_common_only + 'mc'
+    data_path += '.json'
+    index_dir = './se_index/v' + args.wikihop_version + '/'
+    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
+
+    nouns_path = 'nouns/v' + args.wikihop_version + '/nouns' + subset_id
+    if args.nltk:
+        nouns_path += '-nltk_'
+    else:
+        nouns_path += '-spacy_'
+    nouns_path += str(args.subset_size) + '.pkl'
+
+    return subset_id, data_path, index_filename, nouns_path
+
+
 def playground_setup():
     # Set random seed to system time
     random.seed()
@@ -182,33 +207,29 @@ def playground_setup():
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--debug_noun_extraction', nargs='?', const=True, default=False, type=bool,
                         help='If set, evaluate the baseline on a subset of data.')
-    parser.add_argument('--subset_size', nargs=1, default=100, type=int,
+    parser.add_argument('--subset_size', default=100, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
+    parser.add_argument('--k_most_common_only', type=int, default=None,
+                        help='If set, only include the k most commonly occurring relation types.')
+    parser.add_argument('--wikihop_version', type=str, default='1.1',
+                        help='WikiHop version to use: one of {0, 1.1}.')
+    parser.add_argument('--dev', nargs='?', const=True, default=False,
+                        help='If True, build an index on dev data instead of train.')
     args = parser.parse_args()
 
-    use_ntlk = args.nltk
-    # Subset ID and subset size to use as identifiers in index, data, and noun filenames
-    subset_size = args.subset_size
-    if type(subset_size) == list:
-        subset_size = int(subset_size[0])
-    subset_id = '-6mc'
-    file_path = './data/wikihop/train_ids' + subset_id + '.json'
-    index_dir = './se_index'
-    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
-    use_subset = subset_size is not None
-    verbose = args.verbose
+    subset_id, data_path, index_filename, nouns_path = format_paths(args)
     debug_noun_extraction = args.debug_noun_extraction
     allow_multiple_reads = True
 
     print('Initialising...')
-    with open(file_path) as dataset_file:
+    with open(data_path) as dataset_file:
          dataset = json.load(dataset_file)
-    if use_subset:
-        dataset = dataset[:subset_size]
-        index_filename += '_' + str(subset_size)
+    if args.subset_size is not None:
+        dataset = dataset[:args.subset_size]
+        index_filename += '_' + str(args.subset_size)
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
-    if use_ntlk:
+    if args.nltk:
         print('Extracting NTLK nouns...')
         noun_parser_class = NltkNounParser
     else:
@@ -218,10 +239,8 @@ def playground_setup():
     noun_parser = noun_parser_class()
 
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
-    stored_nouns_path = 'nouns/nouns' + subset_id + '_' + str(subset_size) + '.pkl'
-    if noun_parser_class == NltkNounParser:
-        stored_nouns_path = 'nouns/nouns' + subset_id + '-nltk_' + str(subset_size) + '.pkl'
-    nouns = pre_extract_nouns(dataset, stored_nouns_path, noun_parser_class=noun_parser_class)
+    nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
+    print('Loaded extracted nouns for', len(nouns.keys()), 'WikiHop items')
 
     sp_noun_parser = None
     nltk_noun_parser = None
@@ -229,9 +248,9 @@ def playground_setup():
         sp_noun_parser = SpacyNounParser()
         nltk_noun_parser = NltkNounParser()
 
-    reader = readers.reader_from_file("./rc/fastqa_reader")
+    reader = readers.reader_from_file('./rc/fastqa_reader')
     # Playground main loop
-    playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
+    playground_main(dataset, search_engine, reader, nouns, noun_parser, args.verbose,
                     debug_noun_extraction, sp_noun_parser, nltk_noun_parser,
                     allow_multiple_reads=allow_multiple_reads)
     print('Freeing memory...')

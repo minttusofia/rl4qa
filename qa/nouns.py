@@ -1,4 +1,5 @@
 import collections
+import glob
 import json
 import nltk
 import os
@@ -49,47 +50,53 @@ class SpacyNounParser(NounParser):
         return [np.text for np in doc.noun_chunks]
 
 
-def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
-                      superset_file=None, subset_file=None):
-    # Load existing file for this dataset
-    if stored_nouns_path is not None and os.path.exists(stored_nouns_path):
-        return pickle.load(open(stored_nouns_path, 'rb'))
+def load_as_one_dict(pickle_path):
+    """Load all pickled dictionary objects from a .pkl file."""
+    d = collections.defaultdict(list)
+    with open(pickle_path, 'rb') as f:
+        # .pkl file may consist of multiple objects
+        while True:
+            try:
+                noun_dict = (pickle.load(f))
+            except EOFError:
+                break
+            d.update(noun_dict)
+    return d
+
+
+def load_existing_nouns(stored_nouns_path):
+    """Reuse noun files created with the same noun parser and WikiHop version."""
+    similar_files = glob.glob(stored_nouns_path.split('_')[0] + '*')
+    if len(similar_files) > 0:
+        print('Reusing nouns from', ', '.join(similar_files))
+    existing_nouns = collections.defaultdict(list)
+    for file in similar_files:
+        existing_nouns.update(load_as_one_dict(file))
+    return existing_nouns
+
+
+def pre_extract_nouns(dataset, stored_nouns_path, noun_parser_class=SpacyNounParser):
+    """Extract noun phrases from dataset using noun_parser_class and write to stored_nouns_path."""
+    if os.path.exists(stored_nouns_path):
+        # Load existing file for this dataset
+        return load_as_one_dict(stored_nouns_path)
     else:  # If file doesn't exist
-        print('Calling pre extract nouns with', stored_nouns_path)
-        if noun_parser_class is None:
-            noun_parser_class = SpacyNounParser
+        print('\nWriting nouns to', stored_nouns_path)
         parser = noun_parser_class()
-
-        # Use existing file with superset data
-        if superset_file is not None:
-            superset_nouns = pickle.load(open(superset_file, 'rb'))
-            nouns = collections.defaultdict(list)
-            for item in dataset:
-                if len(superset_nouns[item['id']]) == len(item['supports']):
-                    nouns[item['id']] = superset_nouns[item['id']]
-                else:
-                    # If question is missing or partially filled
-                    for doc in item['supports']:
-                        nouns[item['id']].append(parser.extract_nouns(doc))
-            return nouns
-
         nouns = collections.defaultdict(list)
-        # Start from a file with subset data
-        if subset_file is not None:
-            subset_nouns = pickle.load(open(subset_file, 'rb'))
+        existing_nouns = load_existing_nouns(stored_nouns_path)
 
         print('Noun extraction format:', parser.extract_nouns(dataset[0]['supports'][0]))
 
-        if stored_nouns_path is not None:
-            if not os.path.exists(os.path.dirname(stored_nouns_path)):
-                os.makedirs(os.path.dirname(stored_nouns_path))
+        if not os.path.exists(os.path.dirname(stored_nouns_path)):
+            os.makedirs(os.path.dirname(stored_nouns_path))
 
         t = time.time()
         for i in range(len(dataset)):
             item = dataset[i]
             # If entry for item exists in subset file
-            if subset_file is not None and len(subset_nouns[item['id']]) == len(item['supports']):
-                nouns[item['id']] = subset_nouns[item['id']]
+            if item['id'] in existing_nouns:
+                nouns[item['id']] = existing_nouns[item['id']]
             else:
                 for doc in item['supports']:
                     nouns[item['id']].append(parser.extract_nouns(doc))
@@ -104,7 +111,7 @@ def pre_extract_nouns(dataset, stored_nouns_path=None, noun_parser_class=None,
 
         # Append remaining nouns to file
         pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
-        return nouns
+        return load_as_one_dict(stored_nouns_path)  # Load whole dataset
 
 
 if __name__ == '__main__':
