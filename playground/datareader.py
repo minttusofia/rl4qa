@@ -179,11 +179,11 @@ def format_paths(args):
     else:
         base_filename += 'train'
     data_path = base_filename + '_ids'
+
     subset_id = ''
     if args.k_most_common_only:
-        subset_id = '-6mc'
-        data_path += '-' + args.k_most_common_only + 'mc'
-    data_path += '.json'
+        subset_id = '-' + str(args.k_most_common_only) + 'mc'
+    data_path += subset_id + '.json'
     index_dir = './se_index/v' + args.wikihop_version + '/'
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
 
@@ -223,7 +223,7 @@ def playground_setup():
 
     print('Initialising...')
     with open(data_path) as dataset_file:
-         dataset = json.load(dataset_file)
+        dataset = json.load(dataset_file)
     if args.subset_size is not None:
         dataset = dataset[:args.subset_size]
         index_filename += '_' + str(args.subset_size)

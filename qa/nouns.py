@@ -1,6 +1,5 @@
 import collections
 import glob
-import json
 import nltk
 import os
 import pickle
@@ -57,16 +56,22 @@ def load_as_one_dict(pickle_path):
         # .pkl file may consist of multiple objects
         while True:
             try:
-                noun_dict = (pickle.load(f))
+                d.update(pickle.load(f))
             except EOFError:
-                break
-            d.update(noun_dict)
-    return d
+                return d
 
 
-def load_existing_nouns(stored_nouns_path):
+def load_existing_nouns(nouns_path):
     """Reuse noun files created with the same noun parser and WikiHop version."""
-    similar_files = glob.glob(stored_nouns_path.split('_')[0] + '*')
+    nouns_file = nouns_path.split('/')[-1]
+    nouns_path_glob = '/'.join(nouns_path.split('/')[:-1]) + '/'  # match wikihop version exactly
+    nouns_path_glob += (nouns_file.split('-')[0]  # "nouns"
+                        + '-*'  # match any k_most_common
+                        # match noun parser type exactly
+                        + nouns_file.split('-')[-1].split('_')[0].replace('.pkl', '')
+                        + '*')  # match any subset size
+    print('Matching existing nouns files:', nouns_path_glob)
+    similar_files = glob.glob(nouns_path_glob)
     if len(similar_files) > 0:
         print('Reusing nouns from', ', '.join(similar_files))
     existing_nouns = collections.defaultdict(list)
@@ -75,21 +80,21 @@ def load_existing_nouns(stored_nouns_path):
     return existing_nouns
 
 
-def pre_extract_nouns(dataset, stored_nouns_path, noun_parser_class=SpacyNounParser):
-    """Extract noun phrases from dataset using noun_parser_class and write to stored_nouns_path."""
-    if os.path.exists(stored_nouns_path):
+def pre_extract_nouns(dataset, nouns_path, noun_parser_class=SpacyNounParser):
+    """Extract noun phrases from dataset using noun_parser_class and write to nouns_path."""
+    if os.path.exists(nouns_path):
         # Load existing file for this dataset
-        return load_as_one_dict(stored_nouns_path)
+        return load_as_one_dict(nouns_path)
     else:  # If file doesn't exist
-        print('\nWriting nouns to', stored_nouns_path)
+        print('\nWriting nouns to', nouns_path)
         parser = noun_parser_class()
         nouns = collections.defaultdict(list)
-        existing_nouns = load_existing_nouns(stored_nouns_path)
+        existing_nouns = load_existing_nouns(nouns_path)
 
         print('Noun extraction format:', parser.extract_nouns(dataset[0]['supports'][0]))
 
-        if not os.path.exists(os.path.dirname(stored_nouns_path)):
-            os.makedirs(os.path.dirname(stored_nouns_path))
+        if not os.path.exists(os.path.dirname(nouns_path)):
+            os.makedirs(os.path.dirname(nouns_path))
 
         t = time.time()
         for i in range(len(dataset)):
@@ -105,34 +110,11 @@ def pre_extract_nouns(dataset, stored_nouns_path, noun_parser_class=SpacyNounPar
                 t = print_time_taken(t)
             if (i + 1) % 100 == 0:
                 # Append to file regularly for improved fault tolerance
-                pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
+                pickle.dump(nouns, open(nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
                 nouns = collections.defaultdict(list)
-                print('Saved to', stored_nouns_path)
+                print('Saved to', nouns_path)
 
         # Append remaining nouns to file
-        pickle.dump(nouns, open(stored_nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
-        return load_as_one_dict(stored_nouns_path)  # Load whole dataset
-
-
-if __name__ == '__main__':
-    subset_size = None
-    subset_id = '-6mc'
-    stored_nouns_path = 'nouns/nouns' + subset_id
-    use_nltk = False
-    if use_nltk:
-        np_class = NltkNounParser
-        stored_nouns_path += '-nltk'
-    else:
-        np_class = SpacyNounParser
-
-    if subset_size is not None:
-        stored_nouns_path += '_' + str(subset_size)
-        data = json.load(open('./data/wikihop/train_ids.json'))[:subset_size]
-    else:
-        data = json.load(open('./data/wikihop/train_ids.json'))
-
-    nouns = pre_extract_nouns(data, noun_parser_class=np_class,
-                              stored_nouns_path=stored_nouns_path + '.pkl')
-    if subset_size <= 500:
-        print(nouns)
+        pickle.dump(nouns, open(nouns_path, 'ab', pickle.HIGHEST_PROTOCOL))
+        return load_as_one_dict(nouns_path)  # Load whole dataset
 

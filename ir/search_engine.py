@@ -109,7 +109,6 @@ def create_full_id_map(base_filename):
     with open(data_filename) as f:
         dataset = json.load(f)
     t = print_time_taken(t)
-    tokenizer = nltk.tokenize.TreebankWordTokenizer()
     print('Assigning new ids...')
     for q in dataset:
         if 'id' not in q:  # v1.1 has preassigned IDs
@@ -117,6 +116,7 @@ def create_full_id_map(base_filename):
     t = print_time_taken(t)
     print('Tokenizing documents...')
     # Tokenize support documents properly before building TF-IDF
+    tokenizer = nltk.tokenize.TreebankWordTokenizer()
     r = regex.compile(r'\w+\. ')
     for i in range(len(dataset)):
         q = dataset[i]
@@ -129,8 +129,7 @@ def create_full_id_map(base_filename):
             print(i+1, '/', len(dataset), end='\t')
             t = print_time_taken(t)
 
-    with open(id_filename, 'w') as f:
-        json.dump(dataset, f)
+    json.dump(dataset, open(id_filename, 'w'))
 
 
 def run_test_queries(search_engine, t):
@@ -150,7 +149,7 @@ def run_test_queries(search_engine, t):
     _ = print_time_taken(t)
 
 
-def filter_by_most_common(k_most_common_only):
+def filter_by_most_common(k_most_common_only, data_path):
     most_common_relations = ['instance_of',
                              'located_in_the_administrative_territorial_entity',
                              'occupation',
@@ -167,6 +166,9 @@ def filter_by_most_common(k_most_common_only):
     included_relations = most_common_relations[:k_most_common_only]
 
     dataset[:] = [x for x in dataset if x['query'].split()[0] in included_relations]
+    if not os.path.exists(data_path):
+        json.dump(dataset, open(data_path, 'w'))
+
     return dataset
 
 
@@ -217,8 +219,10 @@ if __name__ == '__main__':
     index_dir = './se_index/v' + args.wikihop_version
     index_filename = os.path.join(index_dir, 'se_index')
     if args.k_most_common_only:
-        dataset = filter_by_most_common(args.k_most_common_only)
-        index_filename += '-' + str(args.k_most_common_only) + 'mc'
+        split_id = '-' + str(args.k_most_common_only) + 'mc'
+        index_filename += split_id
+        split_filename = base_filename + '_ids' + split_id + '.json'
+        dataset = filter_by_most_common(args.k_most_common_only, split_filename)
     if args.subset_size:
         dataset = dataset[:args.subset_size]
         index_filename += '_' + str(args.subset_size)

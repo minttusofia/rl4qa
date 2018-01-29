@@ -13,10 +13,11 @@ from jack import readers
 from random import randint
 
 from ir.search_engine import SearchEngine
-from rc.utils import get_rc_answers, get_cached_rc_answers
+from playground.datareader import format_paths
 from qa.nouns import pre_extract_nouns, SpacyNounParser, NltkNounParser
 from qa.question import Question
 from qa.utils import print_time_taken, phrase_appears_in_doc
+from rc.utils import get_rc_answers, get_cached_rc_answers
 
 
 def discount_by_answer_length(answer):
@@ -286,39 +287,58 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
     return correct_answers, incorrect_answers
 
 
+def print_eval_as_table(templates, correct_answers, incorrect_answers, counts_by_type):
+    start_bold = '\033[1m'
+    end_bold = '\033[0;0m'
+    total_correct = sum(correct_answers.values())
+    total_incorrect = sum(incorrect_answers.values())
+    total_count = sum(counts_by_type.values())  # = subset_size
+    for t in sorted(templates.keys()):
+        if counts_by_type[t] == 0:
+            print('No instances of', t, '\n')
+        else:
+            print(t, ':\n', str(int(correct_answers[t])) + '/' + str(int(counts_by_type[t])), '=',
+                  start_bold + '%0.1f' % (float(correct_answers[t])/counts_by_type[t] * 100)+'%'
+                  + end_bold, ' ,',
+                  str(int(incorrect_answers[t])) + '/' + str(int(counts_by_type[t])), '=',
+                  start_bold + '%0.1f' % (float(incorrect_answers[t])/counts_by_type[t] * 100)+'%'
+                  + end_bold, '\n')
+    print(str(int(total_correct)) + '/' + str(total_count), '=',
+          start_bold + '%0.1f' % (float(total_correct)/total_count * 100)+'%' + end_bold)
+    print(str(int(total_incorrect)) + '/' + str(total_count), '=',
+          start_bold + '%0.1f' % (float(total_incorrect)/total_count * 100)+'%' + end_bold)
+
+
 def eval_templates():
     """Shared setup for parallel and sequential evaluation."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--nltk', nargs='?', const=True, default=False, type=bool,
                         help='If True, use NLTK to parse nouns. If False, use Spacy.')
+    parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
+                        help='If True, print out all mentions of the query subject.')
+    parser.add_argument('--subset_size', default=100, type=int,
+                        help='If set, evaluate the baseline on a subset of data.')
+    parser.add_argument('--k_most_common_only', type=int, default=6,
+                        help='If set, only include the k most commonly occurring relation types.')
+    parser.add_argument('--wikihop_version', type=str, default='1.1',
+                        help='WikiHop version to use: one of {0, 1.1}.')
+    parser.add_argument('--dev', nargs='?', const=True, default=False,
+                        help='If True, build an index on dev data instead of train.')
     parser.add_argument('--parallel', nargs='?', const=True, default=False, type=bool,
                         help='If True, use NLTK to parse nouns. If False, use Spacy.')
-    parser.add_argument('--subset_size', nargs=1, default=None, type=int,
-                        help='If set, evaluate the baseline on a subset of data.')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
+    parser.add_argument('--conf_threshold', default=0.1, type=float,
+                        help='Confidence threshold required to use ')
     parser.set_defaults(cache=True)
     args = parser.parse_args()
 
-    use_ntlk = args.nltk
+    subset_id, data_path, index_filename, nouns_path = format_paths(args)
+
     redis_server = None
     if args.cache:
         redis_server = redis.StrictRedis(host='localhost', port=6379, db=0)
     parallel_eval = args.parallel
-    # Subset ID and subset size to use as identifiers in index, data, and noun filenames
-    if args.subset_size is not None:
-        subset_size = int(args.subset_size[0])
-    use_subset = args.subset_size is not None
-    subset_id = '-6mc'
-    file_path = './data/wikihop/train_ids' + subset_id + '.json'
-    index_dir = './se_index'
-    index_filename = os.path.join(index_dir, 'se_index' + subset_id)
-    stored_nouns_path = 'nouns/nouns' + subset_id
-    stored_nouns_path_second = 'nouns/nouns' + subset_id
-    if use_ntlk:
-        stored_nouns_path += '-nltk'
-    else:
-        stored_nouns_path_second += '-nltk'
 
     templates = {'instance_of': 'what is',
                  'located_in_the_administrative_territorial_entity': 'where is',
@@ -328,31 +348,24 @@ def eval_templates():
                  'genre': 'what type is'
                  }
     print('Initialising...')
-    with open(file_path) as dataset_file:
+    with open(data_path) as dataset_file:
         dataset = json.load(dataset_file)
-    if use_subset:
-        dataset = dataset[:subset_size]
-        index_filename += '_' + str(subset_size)
-        stored_nouns_path += '_' + str(subset_size)
-        stored_nouns_path_second += '_' + str(subset_size)
+    if args.subset_size is not None:
+        dataset = dataset[:args.subset_size]
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
-    if use_ntlk:
+    if args.nltk:
         print('Extracting NTLK nouns...')
         noun_parser_class = NltkNounParser
     else:
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
-    nouns = pre_extract_nouns(dataset, stored_nouns_path + '.pkl',
-                              noun_parser_class=noun_parser_class)
+    nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
     reader = readers.reader_from_file('./rc/fastqa_reader')
 
     # Number of instances to test (<= subset size)
-    if use_subset:
-        num_items_to_eval = subset_size
-    else:
-        num_items_to_eval = len(dataset)
+    num_items_to_eval = len(dataset)
     print('Evaluating', num_items_to_eval, 'questions')
     # Maximum number of queries allowed per instance
     max_num_queries = 25
@@ -399,24 +412,7 @@ def eval_templates():
     print('Incorrect guesses', dict(incorrect_answers))
 
     # Print evaluation in readable format
-    start_bold = '\033[1m'
-    end_bold = '\033[0;0m'
-    for t in sorted(templates.keys()):
-        if counts_by_type[t] == 0:
-            print('No instances of', t, '\n')
-        else:
-            print(t, ':\n', str(int(correct_answers[t]))+'/'+str(int(counts_by_type[t])), '=',
-                  start_bold + '%0.1f' % (float(correct_answers[t])/counts_by_type[t] * 100)+'%'
-                  + end_bold, ' ,',
-                  str(int(incorrect_answers[t]))+'/'+str(int(counts_by_type[t])), '=',
-                  start_bold + '%0.1f' % (float(incorrect_answers[t])/counts_by_type[t] * 100)+'%'
-                  + end_bold, '\n')
-    print(str(int(sum(correct_answers.values()))) + '/' + str(subset_size), '=',
-          start_bold + '%0.1f' % (float(sum(correct_answers.values()))/subset_size * 100)+'%' +
-          end_bold)
-    print(str(int(sum(incorrect_answers.values()))) + '/' + str(subset_size), '=',
-          start_bold + '%0.1f' % (float(sum(incorrect_answers.values()))/subset_size * 100)+'%' +
-          end_bold)
+    print_eval_as_table(templates, correct_answers, incorrect_answers, counts_by_type)
     print('Freeing memory...')
 
 
