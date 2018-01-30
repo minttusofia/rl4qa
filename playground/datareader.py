@@ -189,10 +189,12 @@ def format_paths(args):
 
     nouns_path = 'nouns/v' + args.wikihop_version + '/nouns' + subset_id
     if args.nltk:
-        nouns_path += '-nltk_'
+        nouns_path += '-nltk'
     else:
-        nouns_path += '-spacy_'
-    nouns_path += str(args.subset_size) + '.pkl'
+        nouns_path += '-spacy'
+    if args.subset_size is not None:
+        nouns_path += '_' + str(args.subset_size)
+    nouns_path += '.pkl'
 
     return subset_id, data_path, index_filename, nouns_path
 

@@ -4,7 +4,6 @@ import argparse
 import collections
 import json
 import math
-import os
 import random
 import redis
 import time
@@ -328,7 +327,7 @@ def eval_templates():
                         help='If True, use NLTK to parse nouns. If False, use Spacy.')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
-    parser.add_argument('--conf_threshold', default=0.1, type=float,
+    parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
     parser.set_defaults(cache=True)
     args = parser.parse_args()
@@ -370,7 +369,7 @@ def eval_templates():
     # Maximum number of queries allowed per instance
     max_num_queries = 25
     # Threshold above which to trust the reading comprehension module's answers
-    confidence_threshold = 0.10
+    confidence_threshold = args.conf_threshold
     # Whether to penalise answer length
     penalize_long_answers = False
     # Make experiments repeatable
