@@ -2,8 +2,10 @@
 
 import argparse
 import collections
+import csv
 import json
 import math
+import os
 import random
 import redis
 import time
@@ -88,20 +90,40 @@ def eval_nouns(dataset, nouns):
 
 def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                           redis_server, num_items_to_eval, max_num_queries, confidence_threshold,
-                          penalize_long_answers, verbose=False):
+                          csv_path=None, penalize_long_answers=False, verbose=False):
     """Evaluates fixed-structure templates which vary in time by the noun passed in as the object.
     """
     correct_answers = collections.defaultdict(float)
     incorrect_answers = collections.defaultdict(float)
 
+    store_results = False
+    if csv_path is not None:
+        store_results = True
+        if not os.path.exists(os.path.dirname(csv_path)):
+            os.makedirs(os.path.dirname(csv_path))
+        collected_data_header = ['question_id', 'question_type', 'question_subj', 'template',
+                                 'found_correct', 'found_incorrect']
+        if not os.path.exists(csv_path):
+            collected_data = [collected_data_header]
+        else:
+            collected_data = []
+
     t = time.time()
     for i in range(min(len(dataset), num_items_to_eval)):
+        found_correct = False
         if not verbose and i % 10 == 0:
             if i != 0:
                 t = print_time_taken(t)
             print('Evaluating question', i, '/', min(len(dataset), num_items_to_eval))
         question = Question(dataset[i])
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
+        if type(templates) == dict:  # if templates are assigned to query types
+            template = templates[query_type]
+        else:
+            rand_draw = randint(0, len(templates)-1)
+            template = templates[rand_draw]
+        if store_results:
+            collected_data_row = [question.id, query_type, subject, template]
         if verbose:
             print('\n' + str(i), ':', question.query, '(', question.answer, ')')
 
@@ -113,7 +135,15 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         for _ in range(max_num_queries):
             top_doc_found = False
             while not top_doc_found:
-                query = templates[query_type] + ' ' + prev_subj + '?'
+                if type(template) == str:
+                    query = template + ' ' + prev_subj + '?'
+                elif len(template) > 1:
+                    if template[1][0] == '\'':  # template contains [x]'s
+                        query = template[0] + ' ' + prev_subj + template[1] + '?'
+                    else:
+                        query = template[0] + ' ' + prev_subj + ' ' + template[1] + '?'
+                else:
+                    query = template[0] + ' ' + prev_subj + '?'
                 top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
                 # Iterate over ranking backwards (last document is best match)
                 for d in range(len(top_idxs)-1, -1, -1):
@@ -152,6 +182,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                     if answer.text.lower() == question.answer.lower():
                         print(i, ': Found correct answer', answer.text)
                         correct_answers[query_type] += 1
+                        found_correct = True
                         break
                     # If the current answer is not correct and we have not submitted it before
                     elif answer.text.lower() not in incorrect_answers_this_episode:
@@ -164,6 +195,18 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                 # Pick a noun phrase at random from top document
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
                 prev_subj = nouns[question.id][top_idx][rand_draw].lower()
+
+        if store_results:
+            collected_data_row.extend([int(found_correct), len(incorrect_answers_this_episode)])
+            collected_data.append(collected_data_row)
+
+            if (i + 1) % 100 == 0:
+                with open(csv_path, 'a') as f:
+                    writer = csv.writer(f)
+                    for line in collected_data:
+                        writer.writerow(line)
+                print('Written to', csv_path)
+                collected_data = []
 
     return correct_answers, incorrect_answers
 
@@ -286,6 +329,22 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
     return correct_answers, incorrect_answers
 
 
+def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold,
+                    str_noun_parser_class, templates_from_file):
+    csv_path = 'baselines/data'
+    csv_filename = (data_path[:-5].split('wikihop/')[-1]  # trim './data/wikihop/' and '.json',
+                                                          # to keep version directory and filename
+                                                          # e.g. 'v1.1/train_ids'
+                    + '__' + str(len_dataset)
+                    + '_' + str(max_num_queries)
+                    + '_' + str(confidence_threshold)
+                    + '_' + str_noun_parser_class
+                    + '_' + templates_from_file[:-5].split('baselines/')[-1]  # keep templates
+                                                                              # filename
+                    + '.csv')
+    return os.path.join(csv_path, csv_filename)
+
+
 def print_eval_as_table(templates, correct_answers, incorrect_answers, counts_by_type):
     start_bold = '\033[1m'
     end_bold = '\033[0;0m'
@@ -315,9 +374,9 @@ def eval_templates():
                         help='If True, use NLTK to parse nouns. If False, use Spacy.')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
-    parser.add_argument('--subset_size', default=100, type=int,
+    parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
-    parser.add_argument('--k_most_common_only', type=int, default=6,
+    parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
     parser.add_argument('--wikihop_version', type=str, default='1.1',
                         help='WikiHop version to use: one of {0, 1.1}.')
@@ -329,6 +388,10 @@ def eval_templates():
     parser.add_argument('--nocache', dest='cache', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
+    parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
+                        help='If True, save the QA results in a CSV file.')
+    parser.add_argument('--templates_from_file', default='baselines/template_list_72.json',
+                        type=str, help='File from which to read question templates.')
     parser.set_defaults(cache=True)
     args = parser.parse_args()
 
@@ -339,13 +402,6 @@ def eval_templates():
         redis_server = redis.StrictRedis(host='localhost', port=6379, db=0)
     parallel_eval = args.parallel
 
-    templates = {'instance_of': 'what is',
-                 'located_in_the_administrative_territorial_entity': 'where is',
-                 'occupation': 'what work as',
-                 'place_of_birth': 'where was born',
-                 'record_label': 'record label of',
-                 'genre': 'what type is'
-                 }
     print('Initialising...')
     with open(data_path) as dataset_file:
         dataset = json.load(dataset_file)
@@ -356,9 +412,11 @@ def eval_templates():
     if args.nltk:
         print('Extracting NTLK nouns...')
         noun_parser_class = NltkNounParser
+        str_noun_parser_class = 'nltk'
     else:
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
+        str_noun_parser_class = 'spacy'
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
     reader = readers.reader_from_file('./rc/fastqa_reader')
@@ -394,6 +452,26 @@ def eval_templates():
         counts_by_type[item['query'].split()[0]] += 1.0
     print('Question instances by type:', dict(counts_by_type))
 
+    templates = json.load(open(args.templates_from_file))
+    csv_path = None
+    if args.store_results:
+        csv_path = format_csv_path(data_path, len(dataset), max_num_queries, args.conf_threshold,
+                                   str_noun_parser_class, args.templates_from_file)
+        print('Collecting data to', csv_path)
+        if os.path.exists(csv_path):
+            csv_reader = csv.reader(open(csv_path))
+            last_row = None
+            while True:
+                try:
+                    last_row = next(csv_reader)
+                except StopIteration:
+                    break
+            if last_row is not None:
+                last_id = int(last_row[0].split('_')[2])
+                print('Continuing data collection at last ID', last_row[0])
+                # continue appending to file in order
+                dataset = dataset[last_id+1:] + dataset[:last_id]
+
     if evaluate_nouns:
         eval_nouns(dataset, nouns)
     if parallel_eval:
@@ -405,7 +483,7 @@ def eval_templates():
         correct_answers, incorrect_answers = (
             eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
                                   num_items_to_eval, max_num_queries, confidence_threshold,
-                                  penalize_long_answers, verbose))
+                                  csv_path, penalize_long_answers, verbose))
 
     print('Correct guesses', dict(correct_answers))
     print('Incorrect guesses', dict(incorrect_answers))
