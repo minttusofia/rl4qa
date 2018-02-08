@@ -19,6 +19,7 @@ from qa.nouns import pre_extract_nouns, SpacyNounParser, NltkNounParser
 from qa.question import Question
 from qa.utils import print_time_taken, phrase_appears_in_doc
 from rc.utils import get_rc_answers, get_cached_rc_answers
+from shared.utils import trim_index, form_query
 
 
 def discount_by_answer_length(answer):
@@ -109,13 +110,13 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
             collected_data = []
 
     t = time.time()
-    for i in range(min(len(dataset), num_items_to_eval)):
+    for i in range(num_items_to_eval):
         found_correct = False
         if not verbose and i % 10 == 0:
             if i != 0:
                 t = print_time_taken(t)
             print('Evaluating question', i, '/', min(len(dataset), num_items_to_eval))
-        question = Question(dataset[i])
+        question = Question(dataset[i % len(dataset)])
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
         if type(templates) == dict:  # if templates are assigned to query types
             template = templates[query_type]
@@ -135,15 +136,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         for _ in range(max_num_queries):
             top_doc_found = False
             while not top_doc_found:
-                if type(template) == str:
-                    query = template + ' ' + prev_subj + '?'
-                elif len(template) > 1:
-                    if template[1][0] == '\'':  # template contains [x]'s
-                        query = template[0] + ' ' + prev_subj + template[1] + '?'
-                    else:
-                        query = template[0] + ' ' + prev_subj + ' ' + template[1] + '?'
-                else:
-                    query = template[0] + ' ' + prev_subj + '?'
+                query = form_query(template, prev_subj)
                 top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
                 # Iterate over ranking backwards (last document is best match)
                 for d in range(len(top_idxs)-1, -1, -1):
@@ -192,6 +185,8 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                             incorrect_answers[query_type] += 1
                             seen_incorrect_answer_this_episode = True
             else:
+                if verbose:
+                    print('\t->', prev_subj, '(', answer.score, ') -> pick at random')
                 # Pick a noun phrase at random from top document
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
                 prev_subj = nouns[question.id][top_idx][rand_draw].lower()
@@ -345,13 +340,13 @@ def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshol
     return os.path.join(csv_path, csv_filename)
 
 
-def print_eval_as_table(templates, correct_answers, incorrect_answers, counts_by_type):
+def print_eval_as_table(correct_answers, incorrect_answers, counts_by_type):
     start_bold = '\033[1m'
     end_bold = '\033[0;0m'
     total_correct = sum(correct_answers.values())
     total_incorrect = sum(incorrect_answers.values())
     total_count = sum(counts_by_type.values())  # = subset_size
-    for t in sorted(templates.keys()):
+    for t in sorted(counts_by_type.keys()):
         if counts_by_type[t] == 0:
             print('No instances of', t, '\n')
         else:
@@ -376,6 +371,9 @@ def eval_templates():
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
+    parser.add_argument('--num_items_to_eval', default=None, type=int,
+                        help='If set, the number of instances to evaluate. If not set, evaluate '
+                             'full dataset (or subset).')
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
     parser.add_argument('--wikihop_version', type=str, default='1.1',
@@ -386,13 +384,15 @@ def eval_templates():
                         help='If True, use NLTK to parse nouns. If False, use Spacy.')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
+    parser.add_argument('--trim', dest='trim_index', action='store_true')
+    parser.add_argument('--notrim', dest='trim_index', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
     parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
                         help='If True, save the QA results in a CSV file.')
-    parser.add_argument('--templates_from_file', default='baselines/template_list_72.json',
+    parser.add_argument('--templates_from_file', default='baselines/template_list_70.json',
                         type=str, help='File from which to read question templates.')
-    parser.set_defaults(cache=True)
+    parser.set_defaults(cache=True, trim_index=True)
     args = parser.parse_args()
 
     subset_id, data_path, index_filename, nouns_path = format_paths(args)
@@ -421,9 +421,6 @@ def eval_templates():
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
     reader = readers.reader_from_file('./rc/fastqa_reader')
 
-    # Number of instances to test (<= subset size)
-    num_items_to_eval = len(dataset)
-    print('Evaluating', num_items_to_eval, 'questions')
     # Maximum number of queries allowed per instance
     max_num_queries = 25
     # Threshold above which to trust the reading comprehension module's answers
@@ -433,19 +430,28 @@ def eval_templates():
     # Make experiments repeatable
     random.seed(0)
 
-    verbose = False
+    verbose = args.verbose
     evaluate_nouns = False
 
-    dataset = dataset[:num_items_to_eval]
-
     one_type_only = False  # Set to True to evaluate templates on a single relation type
+    included_type = 'located_in_the_administrative_territorial_entity'
     one_type_dataset = []
-    included_type = 'genre'
     if one_type_only:
         for q in dataset:
             if q['query'].split()[0] == included_type:
                 one_type_dataset.append(q)
+
         dataset = one_type_dataset
+
+    # Number of instances to test (<= subset size)
+    if args.num_items_to_eval is None:
+        num_items_to_eval = len(dataset)
+    else:
+        num_items_to_eval = args.num_items_to_eval
+    dataset = dataset[:num_items_to_eval]
+    print('Evaluating', len(dataset), 'questions')
+    if args.trim_index:
+        nouns, search_engine = trim_index(dataset, nouns, search_engine)
 
     counts_by_type = collections.defaultdict(float)
     for item in dataset:
@@ -489,7 +495,7 @@ def eval_templates():
     print('Incorrect guesses', dict(incorrect_answers))
 
     # Print evaluation in readable format
-    print_eval_as_table(templates, correct_answers, incorrect_answers, counts_by_type)
+    print_eval_as_table(correct_answers, incorrect_answers, counts_by_type)
     print('Freeing memory...')
 
 
