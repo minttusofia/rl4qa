@@ -5,14 +5,20 @@ data
 nouns
 
 # Search Engine index
-se_index/*.pkl
+se_index/**/*.pkl
 
 # Data
 allennlp/squad
 allennlp/glove
 
+# Redis
+fastqa.aof
+
 # Mac OS X
 */.DS_Store
+
+# IntelliJ
+.idea
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
