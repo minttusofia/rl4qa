@@ -1,4 +1,5 @@
 import gc
+import random
 
 
 def trim_index(dataset, nouns, search_engine):
@@ -35,3 +36,20 @@ def form_query(template, subject):
     else:
         query = template[0] + ' ' + subject + '?'
     return query
+
+
+def get_document_for_query(action, subj, search_engine, question, nouns, queries_asked):
+    query = form_query(action, subj)
+    top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
+    # Iterate over ranking backwards (last document is best match)
+    for d in range(len(top_idxs)-1, -1, -1):
+        if top_idxs[d] not in queries_asked[query]:
+            top_idx = top_idxs[d]
+            return top_idx, subj, query
+
+    # If question has been asked from all documents, pick a new subject from top doc at random
+    top_idx = top_idxs[-1]
+    subj_t = (nouns[question.id]
+              [top_idx]
+              [random.randint(0, len(nouns[question.id][top_idx])-1)])
+    return None, subj_t, None
