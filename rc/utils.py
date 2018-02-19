@@ -22,10 +22,14 @@ def get_cached_rc_answers(reader, queries, documents, redis_server):
         answer = redis_server.get(pickle.dumps((queries, documents)))
         if answer is None or type(pickle.loads(answer)) is not tuple:
             answer = get_rc_answers(reader, queries, documents)
+            if type(answer[0]) == list:
+                answer = answer[0]
             redis_server.set(pickle.dumps((queries, documents)),
                              pickle.dumps((answer[0].text, answer[0].score)))
         else:
             answer = pickle.loads(answer)
+            if type(answer[0]) == list:
+                answer = answer[0]
             answer = [Answer(text=answer[0], score=answer[1])]
             used_cache = True
 
