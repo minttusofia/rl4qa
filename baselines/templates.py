@@ -365,8 +365,8 @@ def print_eval_as_table(correct_answers, incorrect_answers, counts_by_type):
 def eval_templates():
     """Shared setup for parallel and sequential evaluation."""
     parser = argparse.ArgumentParser()
-    parser.add_argument('--nltk', nargs='?', const=True, default=False, type=bool,
-                        help='If True, use NLTK to parse nouns. If False, use Spacy.')
+    parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
+                        help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--subset_size', default=None, type=int,
@@ -409,14 +409,14 @@ def eval_templates():
         dataset = dataset[:args.subset_size]
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
-    if args.nltk:
-        print('Extracting NTLK nouns...')
-        noun_parser_class = NltkNounParser
-        str_noun_parser_class = 'nltk'
-    else:
+    if args.spacy:
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
         str_noun_parser_class = 'spacy'
+    else:
+        print('Extracting NTLK nouns...')
+        noun_parser_class = NltkNounParser
+        str_noun_parser_class = 'nltk'
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
     reader = readers.reader_from_file('./rc/fastqa_reader')

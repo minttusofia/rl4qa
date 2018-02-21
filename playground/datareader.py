@@ -188,10 +188,10 @@ def format_paths(args):
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
 
     nouns_path = 'nouns/v' + args.wikihop_version + '/nouns' + subset_id
-    if args.nltk:
-        nouns_path += '-nltk'
-    else:
+    if args.spacy:
         nouns_path += '-spacy'
+    else:
+        nouns_path += '-nltk'
     if args.subset_size is not None:
         nouns_path += '_' + str(args.subset_size)
     nouns_path += '.pkl'
@@ -203,8 +203,8 @@ def playground_setup():
     # Set random seed to system time
     random.seed()
     parser = argparse.ArgumentParser()
-    parser.add_argument('--nltk', nargs='?', const=True, default=False, type=bool,
-                        help='If True, use NLTK to parse nouns. If False, use Spacy.')
+    parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
+                        help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--debug_noun_extraction', nargs='?', const=True, default=False, type=bool,
@@ -231,12 +231,12 @@ def playground_setup():
         index_filename += '_' + str(args.subset_size)
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
-    if args.nltk:
-        print('Extracting NTLK nouns...')
-        noun_parser_class = NltkNounParser
-    else:
+    if args.spacy:
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
+    else:
+        print('Extracting NTLK nouns...')
+        noun_parser_class = NltkNounParser
     # To find mentions of subject noun at runtime (if verbose)
     noun_parser = noun_parser_class()
 

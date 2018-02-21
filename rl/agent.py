@@ -63,7 +63,6 @@ def vocab_for_dataset(dataset):
 
 
 def idf_for_dataset(dataset, use_lowercase=True):
-    # TODO: use log(N/n_t)
     df = defaultdict(int)
     for question in dataset:
         for doc in question['supports'] + [question['query']]:
@@ -71,9 +70,17 @@ def idf_for_dataset(dataset, use_lowercase=True):
                 if use_lowercase:
                     word = word.lower()
                 df[word] += 1
+    '''for template in templates:
+        for part in template:
+            for word in part.split():
+                if use_lowercase:
+                    word = word.lower()
+                df[word] += 1'''
+    total_num_words = sum(df.values())
     for word in df.keys():
-        df[word] = 1.0/df[word]
-    return defaultdict(lambda: 1, df)
+        # idf = log(N/n_t)
+        df[word] = np.log(total_num_words/df[word])
+    return defaultdict(lambda: total_num_words/1., df), total_num_words
 
 
 def write_summary(summary_writer, running_reward, episode, episode_length):
@@ -99,13 +106,18 @@ class GloveLookup:
         vocab, _ = vocab_for_dataset(dataset)
         print('Train vocab length', len(vocab))
         if idf_from_file is not None and os.path.exists(idf_from_file):
+            self.idf = defaultdict(float)
             print('Loaded IDF weights from', idf_from_file)
-            self.idf = json.load(io.open(idf_from_file, 'r', encoding='utf-8'))
+            stored_idf = json.load(io.open(idf_from_file, 'r', encoding='utf-8'))
+            num_total_words, idf_weights = stored_idf[0], stored_idf[1]
+            self.idf = defaultdict(lambda: np.log(num_total_words/1))
+            self.idf.update(idf_weights)
         else:
             print('Computing IDF for %i question items...' % len(dataset))
-            self.idf = idf_for_dataset(dataset)
+            self.idf, num_total_words = idf_for_dataset(dataset)
+            idf_with_num_total = [num_total_words, self.idf]
             with io.open(idf_from_file, 'w', encoding='utf8') as f:
-                json.dump(self.idf, f, ensure_ascii=False)
+                json.dump(idf_with_num_total, f, ensure_ascii=False)
 
         self.word2idx, self.lookup = embeddings.glove.load_glove(open(path, 'rb'))
         num_OOV_words = 0
@@ -306,8 +318,8 @@ class Reinforce:
 
 def initialise(included_type):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--nltk', nargs='?', const=True, default=False, type=bool,
-                        help='If True, use NLTK to parse nouns. If False, use Spacy.')
+    parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
+                        help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--subset_size', default=None, type=int,
@@ -330,7 +342,7 @@ def initialise(included_type):
                         help='Learning Rate')
     parser.add_argument('--log_dir', type=str, default='./rl/summaries',
                         help='Directory for TensorBoard summaries.')
-    parser.add_argument('--save_embs', const=True, default=False, type=bool,
+    parser.add_argument('--save_embs', nargs='?', const=True, default=False, type=bool,
                         help='If True, save state embedding vectors to CSV.')
     parser.add_argument('--run_id', type=str, default=None,
                         help='Identifier for TensorBoard summary files.')
@@ -338,6 +350,8 @@ def initialise(included_type):
                         help='If True, randomly pick out of available actions.')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
+    parser.add_argument('--seed', default=0, type=int,
+                        help='Random seed (for policy).')
     parser.set_defaults(cache=True, trim_index=True)
     args = parser.parse_args()
 
@@ -353,12 +367,12 @@ def initialise(included_type):
         dataset = dataset[:args.subset_size]
     search_engine = SearchEngine(dataset, load_from_path=index_filename)
 
-    if args.nltk:
-        print('Extracting NTLK nouns...')
-        noun_parser_class = NltkNounParser
-    else:
+    if args.spacy:
         print('Extracting Spacy nouns...')
         noun_parser_class = SpacyNounParser
+    else:
+        print('Extracting NTLK nouns...')
+        noun_parser_class = NltkNounParser
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
     reader = readers.reader_from_file('./rc/fastqa_reader')
@@ -400,7 +414,7 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
     lr = args.lr
     h_sizes = [64, 32]
     # Make experiments repeatable
-    random.seed(0)
+    random.seed(args.seed)
 
     # Threshold above which to trust the reading comprehension module's answers
     confidence_threshold = args.conf_threshold
