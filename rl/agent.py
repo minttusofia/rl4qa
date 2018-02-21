@@ -1,5 +1,5 @@
 import argparse
-import collections
+import io
 import json
 import numpy as np
 import os
@@ -7,7 +7,9 @@ import random
 import redis
 import sys
 import tensorflow as tf
+import unicodecsv
 
+from collections import defaultdict
 from jack import readers
 from jack.io import embeddings
 from random import randint
@@ -49,6 +51,31 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
     return reward, incorrect_answers_this_episode, corrects, incorrects
 
 
+def vocab_for_dataset(dataset):
+    vocab = set()
+    counts = defaultdict(int)
+    for question in dataset:
+        for doc in question['supports']:
+            for w in doc.split():
+                vocab.add(w)
+                counts[w] += 1
+    return vocab, counts
+
+
+def idf_for_dataset(dataset, use_lowercase=True):
+    # TODO: use log(N/n_t)
+    df = defaultdict(int)
+    for question in dataset:
+        for doc in question['supports'] + [question['query']]:
+            for word in doc.split():
+                if use_lowercase:
+                    word = word.lower()
+                df[word] += 1
+    for word in df.keys():
+        df[word] = 1.0/df[word]
+    return defaultdict(lambda: 1, df)
+
+
 def write_summary(summary_writer, running_reward, episode, episode_length):
     ep_summary = tf.Summary()
     ep_summary.value.add(simple_value=running_reward, tag='reward')
@@ -58,47 +85,98 @@ def write_summary(summary_writer, running_reward, episode, episode_length):
 
 
 def unit_sphere(var_matrix, norm=1.0, axis=1):
+    # Norm for each word embedding vector
     row_norms = np.sqrt(np.sum(np.square(var_matrix), axis=axis))
+    # Divide vectors by their norms to obtain unit vectors
     scaled = var_matrix * np.expand_dims(norm / row_norms, axis=axis)
     return scaled
-    # TODO:
-    # tensorflow/python/ops/gradients_impl.py:95:
-    # UserWarning: Converting sparse IndexedSlices to a dense Tensor of unknown shape. This may
-    # consume a large amount of memory.
 
 
 class GloveLookup:
-    def __init__(self, path, dim, vocab):
+    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_weights_lower.json'):
+        self.emb_dim = dim
         print('Loading GloVe...')
+        vocab, _ = vocab_for_dataset(dataset)
+        print('Train vocab length', len(vocab))
+        if idf_from_file is not None and os.path.exists(idf_from_file):
+            print('Loaded IDF weights from', idf_from_file)
+            self.idf = json.load(io.open(idf_from_file, 'r', encoding='utf-8'))
+        else:
+            print('Computing IDF for %i question items...' % len(dataset))
+            self.idf = idf_for_dataset(dataset)
+            with io.open(idf_from_file, 'w', encoding='utf8') as f:
+                json.dump(self.idf, f, ensure_ascii=False)
+
         self.word2idx, self.lookup = embeddings.glove.load_glove(open(path, 'rb'))
         num_OOV_words = 0
         for word in tqdm(vocab):
-            if word not in self.word2idx:
-                num_OOV_words += 1
+            if word.lower() not in self.word2idx:
                 idx = len(self.word2idx)
+                num_OOV_words += 1
                 self.word2idx[word.lower()] = idx
                 if idx > len(self.lookup) - 1:
                     self.lookup.resize([self.lookup.shape[0] + 50000, self.lookup.shape[1]])
                 self.lookup[idx] = np.random.normal(0.0, 1.0, size=[1, dim])
-        # percentage of OOV
-        # keep fixed / learn?
+        # TODO: learn linear transformation for task
         print('Initialised', num_OOV_words, 'new words')
         self.OOV = np.zeros(dim)
         self.OOV[0] = 1
-        self.lookup = unit_sphere(self.lookup[:len(self.word2idx) + 1, :])
+        print(self.lookup[:len(self.word2idx), :].shape)
+        self.lookup = unit_sphere(self.lookup[:len(self.word2idx), :])
+        self.state_str_history = []
+        self.state_history = []
+        self.avg_state_history = []
+        self.dataset_len = len(dataset)
+
+    def save_history_to_csv(self):
+        print('History length', len(self.state_history), len(self.state_str_history),
+              len(self.avg_state_history))
+
+        with open('rl/tf_idf_states-%i.csv' % self.dataset_len, 'wb') as f:
+            writer = unicodecsv.writer(f)
+            for s in self.state_history:
+                writer.writerow(list(s))
+        with open('rl/avg_states-%i.csv' % self.dataset_len, 'wb') as f:
+            writer = unicodecsv.writer(f)
+            for s in self.avg_state_history:
+                writer.writerow(list(s))
+        with open('rl/state-strs-%i.txt' % self.dataset_len, 'w') as f:
+            for s in self.state_str_history:
+                f.write(str(s) + '\n')
 
     def lookup_word(self, word):
         if word.lower() in self.word2idx:
             return self.lookup[self.word2idx[word.lower()]]
         return self.OOV
 
+    def lookup_doc_tf_idf(self, doc, tf):
+        words = doc.split()
+        for w in words:
+            if w.lower() not in tf:
+                print(w.lower(), 'not in tf')
+            if w.lower() not in self.idf:
+                print(doc)
+                print(w.lower(), 'not in idf')
+        return np.mean([tf[w.lower()] * self.idf[w.lower()] * self.lookup_word(w) for w in words],
+                       axis=0)
+
     def lookup_doc_avg(self, doc):
         words = doc.split()
         return np.mean([self.lookup_word(w) for w in words], axis=0)
 
     def embed_state(self, s):
-        # TODO: use TF-IDF weights
-        return [self.lookup_doc_avg(elem) for elem in s]
+        tfs = []
+        for elem in s:
+            tfs.append(defaultdict(int))
+            for word in elem.split():
+                tfs[-1][word.lower()] += 1
+        tf_idf_state = np.stack([self.lookup_doc_tf_idf(s[e], tfs[e]) for e in range(len(s))],
+                                axis=0).flatten()
+        naive_state = np.stack([self.lookup_doc_avg(elem) for elem in s], axis=0).flatten()
+        self.state_history.append(list(tf_idf_state))
+        self.avg_state_history.append(list(naive_state))
+        self.state_str_history.append(s)
+        return tf_idf_state
 
 
 def eval_random_baseline(dataset, search_engine, nouns, reader, redis_server, actions, max_queries,
@@ -136,7 +214,7 @@ def eval_random_baseline(dataset, search_engine, nouns, reader, redis_server, ac
             subj_t = subj0
             incorrect_answers_this_episode = []
             # Store past queries asked -> documents retrieved mappings
-            queries_asked = collections.defaultdict(list)
+            queries_asked = defaultdict(list)
             for t in range(max_queries):
                 top_idx = None
                 while top_idx is None:
@@ -191,12 +269,14 @@ def eval_random_baseline(dataset, search_engine, nouns, reader, redis_server, ac
 
 class Reinforce:
     """Based on https://github.com/awjuliani/DeepRL-Agents/blob/master/Vanilla-Policy.ipynb."""
-    def __init__(self, lr, state_shape, action_shape, hidden_size):
+    def __init__(self, lr, state_shape, action_shape, hidden_sizes):
         # Policy network
         self.state_in = tf.placeholder(shape=[None, state_shape], dtype=tf.float32)
-        hidden = tf.contrib.slim.fully_connected(self.state_in, hidden_size,
-                                                 biases_initializer=None,
-                                                 activation_fn=tf.nn.relu)
+        hidden = self.state_in
+        for h_size in hidden_sizes:
+            hidden = tf.contrib.slim.fully_connected(hidden, h_size,
+                                                     biases_initializer=None,
+                                                     activation_fn=tf.nn.relu)
         self.output = tf.contrib.slim.fully_connected(hidden, action_shape,
                                                       activation_fn=tf.nn.softmax,
                                                       biases_initializer=None)
@@ -246,8 +326,12 @@ def initialise(included_type):
     parser.add_argument('--nocache', dest='cache', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
+    parser.add_argument('--lr', default=0.01, type=float,
+                        help='Learning Rate')
     parser.add_argument('--log_dir', type=str, default='./rl/summaries',
                         help='Directory for TensorBoard summaries.')
+    parser.add_argument('--save_embs', const=True, default=False, type=bool,
+                        help='If True, save state embedding vectors to CSV.')
     parser.add_argument('--run_id', type=str, default=None,
                         help='Identifier for TensorBoard summary files.')
     parser.add_argument('--random_agent', action='store_true', default=False,
@@ -303,17 +387,18 @@ def initialise(included_type):
 
 def train(query_type, dataset, search_engine, nouns, reader, redis_server, args):
     if query_type == 'located_in_the_administrative_territorial_entity':
-        actions = ['where is',
-                   'municipality of',
-                   'located']
+        actions = [['where is'],
+                   ['municipality of'],
+                   ['located'],
+                   ['what kind of socks does', 'wear']]
     elif query_type == 'occupation':
         actions = ['employer of',
                    'colleague of',
                    'known for',
                    'work as']
-    gamma = 0.99
-    lr = 0.001
-    h_size = 50
+    gamma = 0.95
+    lr = args.lr
+    h_sizes = [64, 32]
     # Make experiments repeatable
     random.seed(0)
 
@@ -333,25 +418,21 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
         sys.exit()
 
     emb_dim = 50
-    train_vocab = set()
-    for q in dataset:
-        for doc in q['supports']:
-            for w in doc.split():
-                train_vocab.add(w)
-    print('Train vocab length', len(train_vocab))
-    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim, train_vocab)
+    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim, dataset)
 
-    summaries_path = 'rl/summaries/%s' % args.run_id
-    checkpoints_path = 'rl/checkpoints/%s/model-' % args.run_id
-    for path in [summaries_path, checkpoints_path]:
-        if not os.path.exists(os.path.dirname(path)):
-            os.makedirs(os.path.dirname(path))
+    if args.run_id is not None:
+        run_id = args.run_id + '-lr' + str(lr)
+        summaries_path = 'rl/summaries/%s' % run_id
+        checkpoints_path = 'rl/checkpoints/%s/model-' % run_id
+        for path in [summaries_path, checkpoints_path]:
+            if not os.path.exists(os.path.dirname(path)):
+                os.makedirs(os.path.dirname(path))
 
     tf.reset_default_graph()
 
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1 + history
     #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim + TODO
-    agent = Reinforce(lr=lr, state_shape=5*emb_dim, action_shape=len(actions), hidden_size=h_size)
+    agent = Reinforce(lr=lr, state_shape=5*emb_dim, action_shape=len(actions), hidden_sizes=h_sizes)
 
     update_frequency = 50
     corrects = []
@@ -387,7 +468,7 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
                 rc_answers, _ = get_cached_rc_answers(reader, query0, d0, redis_server)
             ans0 = rc_answers[0]
             # Initial state
-            s_prev = [subj0, actions[0], subj0, d0, ans0.text]
+            s_prev = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
             s_prev = np.hstack(embs.embed_state(s_prev))
             # Should first answer be checked?
             '''
@@ -401,7 +482,7 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
             subj_t = subj0
 
             # Store past queries asked -> documents retrieved mappings
-            queries_asked = collections.defaultdict(list)
+            queries_asked = defaultdict(list)
             for t in range(max_queries):
                 top_idx = None
                 while top_idx is None:
@@ -423,7 +504,8 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
                 (r, incorrect_answers_this_episode, corrects, incorrects) = (
                     check_answer(ans_t, question, incorrect_answers_this_episode, e, corrects,
                                  incorrects))
-                s_t = [subj0, actions[a_t], subj_t, d_t, ans_t.text]
+                # TODO: alternative: form_query(actions[a_t], subj_t)
+                s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
                 s_t = np.hstack(embs.embed_state(s_t))
 
                 history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
@@ -471,6 +553,8 @@ def train(query_type, dataset, search_engine, nouns, reader, redis_server, args)
                 print('  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
                 if args.run_id is not None:
                     saver.save(sess, checkpoints_path + str(e) + '.cptk')
+    if args.save_embs:
+        embs.save_history_to_csv()
 
 
 if __name__ == "__main__":
