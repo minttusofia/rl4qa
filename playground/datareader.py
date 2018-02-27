@@ -5,6 +5,7 @@ import collections
 import json
 import os
 import random
+import sys
 
 from colors import color
 from jack import readers
@@ -172,7 +173,7 @@ def playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
             break
 
 
-def format_paths(args):
+def format_paths(args, dev=False):
     base_filename = './data/wikihop/v' + args.wikihop_version + '/'
     if args.dev:
         base_filename += 'dev'
@@ -184,10 +185,15 @@ def format_paths(args):
     if args.k_most_common_only:
         subset_id = '-' + str(args.k_most_common_only) + 'mc'
     data_path += subset_id + '.json'
-    index_dir = './se_index/v' + args.wikihop_version + '/'
+    index_dir = './se_index/v' + args.wikihop_version
+    if dev:
+        index_dir = os.path.join(index_dir, 'dev')
     index_filename = os.path.join(index_dir, 'se_index' + subset_id)
 
-    nouns_path = 'nouns/v' + args.wikihop_version + '/nouns' + subset_id
+    nouns_path = 'nouns/v' + args.wikihop_version
+    if dev:
+        nouns_path = os.path.join(nouns_path, 'dev')
+    nouns_path = os.path.join(nouns_path, 'nouns' + subset_id)
     if args.spacy:
         nouns_path += '-spacy'
     else:
@@ -209,7 +215,7 @@ def playground_setup():
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--debug_noun_extraction', nargs='?', const=True, default=False, type=bool,
                         help='If set, evaluate the baseline on a subset of data.')
-    parser.add_argument('--subset_size', default=100, type=int,
+    parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
@@ -219,7 +225,7 @@ def playground_setup():
                         help='If True, build an index on dev data instead of train.')
     args = parser.parse_args()
 
-    subset_id, data_path, index_filename, nouns_path = format_paths(args)
+    subset_id, data_path, index_filename, nouns_path = format_paths(args, args.dev)
     debug_noun_extraction = args.debug_noun_extraction
     allow_multiple_reads = True
 

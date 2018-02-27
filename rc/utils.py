@@ -65,6 +65,8 @@ def show_rc_answers(reader, queries, documents):
     if type(queries) != list:
         answers = reader([QASetting(question=queries, support=[documents])])
         for a in answers:
+            if type(a) == list:
+                a = a[0]
             print(a.text, '\tscore:', a.score)
     else:
         questions = []
@@ -73,5 +75,7 @@ def show_rc_answers(reader, queries, documents):
         answers = reader(questions)
         for q in answers:
             for a in q:
+                if type(a) == list:
+                    a = a[0]
                 print(a.text, '\tscore:', a.score)
             print()

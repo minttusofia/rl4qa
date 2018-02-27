@@ -217,6 +217,8 @@ if __name__ == '__main__':
     print('Initialising search engine...')
 
     index_dir = './se_index/v' + args.wikihop_version
+    if args.dev:
+        index_dir = os.path.join(index_dir, 'dev')
     index_filename = os.path.join(index_dir, 'se_index')
     if args.k_most_common_only:
         split_id = '-' + str(args.k_most_common_only) + 'mc'
@@ -236,7 +238,7 @@ if __name__ == '__main__':
         se = SearchEngine(load_from_path=index_filename)
     t = print_time_taken(t)
 
-    if not args.k_most_common_only:
+    if not args.k_most_common_only and not args.dev:
         # Test initialised search engine
         run_test_queries(se, t)
 
