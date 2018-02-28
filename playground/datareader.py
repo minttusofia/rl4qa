@@ -175,7 +175,7 @@ def playground_main(dataset, search_engine, reader, nouns, noun_parser, verbose,
 
 def format_paths(args, dev=False):
     base_filename = './data/wikihop/v' + args.wikihop_version + '/'
-    if args.dev:
+    if dev:
         base_filename += 'dev'
     else:
         base_filename += 'train'

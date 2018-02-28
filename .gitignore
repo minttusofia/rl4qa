@@ -15,8 +15,8 @@ allennlp/glove
 fastqa.aof
 
 # TensorFlow
-rl/checkpoints
-rl/summaries
+rl/**/checkpoints
+rl/**/summaries
 
 # Mac OS X
 */.DS_Store
