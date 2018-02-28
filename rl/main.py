@@ -6,6 +6,7 @@ import random
 import redis
 import tensorflow as tf
 
+from bisect import bisect
 from collections import defaultdict
 from jack import readers
 from random import randint
@@ -33,7 +34,7 @@ def format_run_id(args):
     else:
         run_id = ('-'.join(['l%i' % layer_size for layer_size in args.h_sizes])
                   + '-g' + str(args.gamma)
-                  + 'lr' + str(args.lr)
+                  + '-lr' + str(args.lr)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
                   + '-max%i' % args.max_queries
@@ -43,13 +44,13 @@ def format_run_id(args):
     return run_id
 
 
-def format_experiment_paths(query_type, random_agent, run_id, dirname, dev=False):
+def format_experiment_paths(query_type, run_id, dirname, dev=False, save_checkpoints=True):
     checkpoint_path = None
     if dirname is not None:
         dirname += '/'
     else:
         dirname = ''
-    if not random_agent:
+    if save_checkpoints:
         checkpoint_path = 'rl/checkpoints/{}{}/{}/model-'.format(dirname, query_type, run_id)
     if dev:
         summaries_path = 'rl/summaries/{}{}/dev/{}'.format(dirname, query_type, run_id)
@@ -57,8 +58,6 @@ def format_experiment_paths(query_type, random_agent, run_id, dirname, dev=False
     else:
         summaries_path = 'rl/summaries/{}{}/train/{}'.format(dirname, query_type, run_id)
         eval_path = 'rl/eval/{}{}/train/{}.txt'.format(dirname, query_type, run_id)
-        #if train:
-        #    checkpoint_path = 'rl/checkpoints/{}{}/{}/model-'.format(dirname, query_type, run_id)
     return summaries_path, checkpoint_path, eval_path
 
 
@@ -111,11 +110,33 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
     return reward, incorrect_answers_this_episode, corrects, incorrects
 
 
-def write_summary(summary_writer, running_reward, episode, episode_length):
+def accuracy_from_history(corrects, ep, horizon=100):
+    if horizon is None:
+        return float(len(corrects))/(ep + 1)
+    first_in_horizon = bisect(corrects, ep - horizon)
+    # Number of episodes passed
+    ep += 1
+    accuracy = float(len(corrects[first_in_horizon:])) / min(horizon, ep)
+    if ep <= horizon:
+        if not np.isclose(accuracy, float(len(corrects)) / ep):
+            print(accuracy, float(len(corrects)) / ep, len(corrects), ep)
+        assert np.isclose(accuracy, float(len(corrects)) / ep)
+    return accuracy
+
+
+def scalar_summaries(running_reward, ep_length, corrects, ep):
+    accuracy_horizon = 100
+    accuracy = accuracy_from_history(corrects, ep, accuracy_horizon)
+    return {'reward': running_reward,
+            'episode_length': ep_length,
+            'accuracy ({})'.format(accuracy_horizon): accuracy}
+
+
+def write_summary(summary_writer, episode, simple_values):
+    # TODO: add intermediate activations, action values
     ep_summary = tf.Summary()
-    # TODO: add intermediate activations, action values (pass in as dict)
-    ep_summary.value.add(simple_value=running_reward, tag='reward')
-    ep_summary.value.add(simple_value=episode_length, tag='episode_length')
+    for k, v in simple_values.items():
+        ep_summary.value.add(simple_value=v, tag=k)
     summary_writer.add_summary(ep_summary, episode)
     summary_writer.flush()
 
@@ -130,11 +151,18 @@ def write_eval_file(eval_path, corrects, incorrects, num_episodes):
                                                 float(len(incorrects))/num_episodes))
 
 
-def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, args,
-              agent_from_checkpoint=None, dev=False):
+def new_or_existing_session(existing_sess=None):
+    if existing_sess is not None:
+        return existing_sess
+    return tf.Session()
+
+
+def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, embs, args,
+              agent_from_checkpoint=None, dev=False, eval_dataset=None, eval_search_engine=None,
+              eval_nouns=None, existing_session=None, total_accuracy_only=False, outer_e=None):
     actions = actions_for_query_type(query_type)
     random.seed(args.seed)
-    train = agent_from_checkpoint is None and not args.random_agent
+    train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
 
     # Threshold above which to trust the reading comprehension module's answers
     confidence_threshold = args.conf_threshold
@@ -155,19 +183,23 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, a
     # Only used when random_agent=False
     h_sizes = args.h_sizes
 
+    # Only used when eval_dataset is not None
+    eval_freq = 4000
+
     emb_dim = 50
-    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim, dataset)
 
     if args.run_id is not None:
         run_id = format_run_id(args)  # args.run_id + '-lr' + str(lr)
         summaries_path, checkpoint_path, eval_path = format_experiment_paths(
-            query_type, args.random_agent, run_id, args.dirname, dev)
+            query_type, run_id, args.dirname, dev, save_checkpoints=train)
         for path in [summaries_path, checkpoint_path]:
             if path is not None and not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
 
     # TODO: should this not be run for existing agent?
-    tf.reset_default_graph()
+    if existing_session is None:
+        tf.reset_default_graph()
+
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1 + history
     #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim + TODO
     s_size = 5 * emb_dim
@@ -178,135 +210,158 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, a
         agent = RandomAgent(state_shape=s_size, action_shape=a_size)
     else:
         agent = Reinforce(lr=lr, state_shape=s_size, action_shape=a_size, hidden_sizes=h_sizes)
+        saver = tf.train.Saver()
 
-    corrects = []
-    incorrects = []
-    incorrect_answers_this_episode = []
+    corrects, incorrects, incorrect_answers_this_episode = [], [], []
 
-    with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
-        if args.run_id is not None:
-            summary_writer = tf.summary.FileWriter(summaries_path, sess.graph)
-            if not args.random_agent:  # no variables to save/retrieve for random agent
-                saver = tf.train.Saver()
-                if agent_from_checkpoint is not None:
-                    saver.restore(sess, agent_from_checkpoint)
-        reward_history = []
-        ep_length_history = []
+    if existing_session is None:
+        sess = tf.Session()
+    else:
+        sess = existing_session
 
-        if train:
-            gradBuffer = sess.run(tf.trainable_variables())
-            for ix, grad in enumerate(gradBuffer):
-                gradBuffer[ix] = grad * 0
+    sess.run(tf.global_variables_initializer())
+    if args.run_id is not None:
+        summary_writer = tf.summary.FileWriter(summaries_path, sess.graph)
+        if not args.random_agent:  # no variables to save/retrieve for random agent
+            # saver = tf.train.Saver()
+            if agent_from_checkpoint is not None:
+                print('Loading saved agent form', agent_from_checkpoint)
+                saver.restore(sess, agent_from_checkpoint)
+    reward_history = []
+    ep_length_history = []
 
-        for e in range(num_episodes):
-            question = Question(dataset[e % len(dataset)])
-            _, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
-            # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
-            query0 = form_query(actions[0], subj0)
-            # First query won't have been asked from top doc
-            top_idx = search_engine.rank_docs(question.id, query0, topk=len(question.supports))[-1]
-            d0 = question.supports[top_idx]
+    if train:
+        gradBuffer = sess.run(tf.trainable_variables())
+        for ix, grad in enumerate(gradBuffer):
+            gradBuffer[ix] = grad * 0
+
+    for e in range(num_episodes):
+        question = Question(dataset[e % len(dataset)])
+        _, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
+        # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
+        query0 = form_query(actions[0], subj0)
+        # First query won't have been asked from top doc
+        top_idx = search_engine.rank_docs(question.id, query0, topk=len(question.supports))[-1]
+        d0 = question.supports[top_idx]
+
+        # Send query to RC module
+        if redis_server is None:
+            rc_answers = get_rc_answers(reader, query0, d0)
+        else:
+            rc_answers, _ = get_cached_rc_answers(reader, query0, d0, redis_server)
+        ans0 = rc_answers[0]
+        # Initial state: pick action 0 automatically
+        s_prev = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
+        s_prev = np.hstack(embs.embed_state(s_prev))
+        # Should first answer be checked?
+        '''
+        (r, correct_answers, incorrect_answers, incorrect_answers_this_episode,
+         seen_incorrect_answer_this_episode) = (
+             check_answer(ans0, question, correct_answers, incorrect_answers,
+                          incorrect_answers_this_episode, seen_incorrect_answer_this_episode,
+                          e))
+        '''
+        ep_reward = 0
+        subj_t = subj0
+
+        # Store past queries asked -> documents retrieved mappings
+        queries_asked = defaultdict(list)
+        for t in range(max_queries):
+            top_idx = None
+            while top_idx is None:
+                # Pick action according to policy
+                a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
+                a_t = np.random.choice(range(len(actions)), p=a_distr[0])
+                top_idx, subj_t, query_t = get_document_for_query(
+                    actions[a_t], subj_t, search_engine, question, nouns, queries_asked)
+            queries_asked[query_t].append(top_idx)
+            d_t = question.supports[top_idx]
 
             # Send query to RC module
             if redis_server is None:
-                rc_answers = get_rc_answers(reader, query0, d0)
+                rc_answers = get_rc_answers(reader, query_t, d_t)
             else:
-                rc_answers, _ = get_cached_rc_answers(reader, query0, d0, redis_server)
-            ans0 = rc_answers[0]
-            # Initial state: pick action 0 automatically
-            s_prev = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
-            s_prev = np.hstack(embs.embed_state(s_prev))
-            # Should first answer be checked?
-            '''
-            (r, correct_answers, incorrect_answers, incorrect_answers_this_episode,
-             seen_incorrect_answer_this_episode) = (
-                 check_answer(ans0, question, correct_answers, incorrect_answers,
-                              incorrect_answers_this_episode, seen_incorrect_answer_this_episode,
-                              e))
-            '''
-            ep_reward = 0
-            subj_t = subj0
+                rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server)
+            ans_t = rc_answers[0]
 
-            # Store past queries asked -> documents retrieved mappings
-            queries_asked = defaultdict(list)
-            for t in range(max_queries):
-                top_idx = None
-                while top_idx is None:
-                    # Pick action according to policy
-                    a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
-                    a_t = np.random.choice(range(len(actions)), p=a_distr[0])
-                    top_idx, subj_t, query_t = get_document_for_query(
-                        actions[a_t], subj_t, search_engine, question, nouns, queries_asked)
-                queries_asked[query_t].append(top_idx)
-                d_t = question.supports[top_idx]
+            (r, incorrect_answers_this_episode, corrects, incorrects) = (
+                check_answer(ans_t, question, incorrect_answers_this_episode, e, corrects,
+                             incorrects, t == max_queries - 1, args.default_r,
+                             args.found_candidate_r, args.penalty, args.success_r))
+            # TODO: alternative: form_query(actions[a_t], subj_t)
+            s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
+            s_t = np.hstack(embs.embed_state(s_t))
 
-                # Send query to RC module
-                if redis_server is None:
-                    rc_answers = get_rc_answers(reader, query_t, d_t)
-                else:
-                    rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server)
-                ans_t = rc_answers[0]
+            history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
+            if t == 0:
+                ep_history = history_frame
+            else:
+                ep_history = np.append(ep_history, history_frame, axis=0)
+            s_prev = s_t
+            if ans_t.score > confidence_threshold:
+                subj_t = ans_t.text.lower()
+            else:
+                # Pick a noun phrase at random from top document
+                rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
+                subj_t = nouns[question.id][top_idx][rand_draw].lower()
+            ep_reward += r
+            ep_length = t
+            if r == 1:
+                print('\tAction history:', ep_history[:, 1])
+                break
 
-                (r, incorrect_answers_this_episode, corrects, incorrects) = (
-                    check_answer(ans_t, question, incorrect_answers_this_episode, e, corrects,
-                                 incorrects, t == max_queries - 1, args.default_r,
-                                 args.found_candidate_r, args.penalty, args.success_r))
-                # TODO: alternative: form_query(actions[a_t], subj_t)
-                s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
-                s_t = np.hstack(embs.embed_state(s_t))
+        if train:
+            ep_history[:, 2] = discount_rewards(ep_history[:, 2], gamma)
+            feed_dict = {agent.reward_holder: ep_history[:, 2],
+                         agent.action_holder: ep_history[:, 1],
+                         agent.state_in: np.vstack(ep_history[:, 0])}
+            grads = sess.run(agent.gradients, feed_dict=feed_dict)
+            for idx, grad in enumerate(grads):
+                gradBuffer[idx] += grad
 
-                history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
-                if t == 0:
-                    ep_history = history_frame
-                else:
-                    ep_history = np.append(ep_history, history_frame, axis=0)
-                s_prev = s_t
-                if ans_t.score > confidence_threshold:
-                    subj_t = ans_t.text.lower()
-                else:
-                    # Pick a noun phrase at random from top document
-                    rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
-                    subj_t = nouns[question.id][top_idx][rand_draw].lower()
-                ep_reward += r
-                ep_length = t
-                if r == 1:
-                    print('\tAction history:', ep_history[:, 1])
-                    break
+            if e % update_frequency == 0 and e != 0:
+                feed_dict = dict(zip(agent.gradient_holders, gradBuffer))
+                _ = sess.run(agent.update_batch, feed_dict=feed_dict)
+                for ix, grad in enumerate(gradBuffer):
+                    gradBuffer[ix] = grad * 0
 
-            if train:
-                ep_history[:, 2] = discount_rewards(ep_history[:, 2], gamma)
-                feed_dict = {agent.reward_holder: ep_history[:, 2],
-                             agent.action_holder: ep_history[:, 1],
-                             agent.state_in: np.vstack(ep_history[:, 0])}
-                grads = sess.run(agent.gradients, feed_dict=feed_dict)
-                for idx, grad in enumerate(grads):
-                    gradBuffer[idx] += grad
+        if args.run_id is not None:
+            if total_accuracy_only:
+                write_summary(summary_writer, outer_e,
+                              {'total_dev_accuracy':
+                                   accuracy_from_history(corrects, e, horizon=None)})
+            else:
+                write_summary(summary_writer, e,
+                              scalar_summaries(ep_reward, ep_length, corrects, e))
+        reward_history.append(ep_reward)
+        ep_length_history.append(len(ep_history))
 
-                if e % update_frequency == 0 and e != 0:
-                    feed_dict = dict(zip(agent.gradient_holders, gradBuffer))
-                    _ = sess.run(agent.update_batch, feed_dict=feed_dict)
-                    for ix, grad in enumerate(gradBuffer):
-                        gradBuffer[ix] = grad * 0
+        if e % 10 == 0:
+            print('  Agent output',
+                  sess.run(agent.output, feed_dict={agent.state_in: [s_prev]}))
+            print('  Reward history', np.mean(reward_history[-100:]))
+            print('  Correct answers', len(corrects), float(len(corrects))/(e+1))
+            print('  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
+        if (e + 1) % (2 * update_frequency) == 0 and train and args.run_id is not None:
+            print('Saving model to', checkpoint_path + str(e) + '.ckpt')
+            saver.save(sess, checkpoint_path + str(e) + '.ckpt')
+            last_ckpt_e = e
+        if eval_dataset is not None and (e + 1) % eval_freq == 0:
+            print('Running intermediate eval step with', checkpoint_path + str(last_ckpt_e) +
+                  '.ckpt')
+            # Track accuracy on dev set
+            run_agent(query_type, eval_dataset, eval_search_engine, eval_nouns, reader,
+                      redis_server, embs, args, dev=True, existing_session=sess,
+                      total_accuracy_only=True, outer_e=e)
 
-            if args.run_id is not None:
-                write_summary(summary_writer, ep_reward, e, ep_length)
-            reward_history.append(ep_reward)
-            ep_length_history.append(len(ep_history))
+    # Save final model
+    if train and args.run_id is not None:
+        saver.save(sess, checkpoint_path + 'final' + '.ckpt')
+        print('Saved weights to', checkpoint_path + 'final' + '.ckpt')
 
-            if e % 10 == 0:
-                print('  Agent output',
-                      sess.run(agent.output, feed_dict={agent.state_in: [s_prev]}))
-                print('  Reward history', np.mean(reward_history[-100:]))
-                print('  Correct answers', len(corrects), float(len(corrects))/(e+1))
-                print('  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
-                if train and args.run_id is not None:
-                    saver.save(sess, checkpoint_path + str(e) + '.ckpt')
+    if existing_session is None:
+        sess.close()
 
-        # Save final model
-        if train and args.run_id is not None:
-            saver.save(sess, checkpoint_path + 'final' + '.ckpt')
-            print('Saved weights to', checkpoint_path + 'final' + '.ckpt')
     # TODO: save activations of hidden layers
     if args.save_embs:
         embs.save_history_to_csv()
@@ -321,6 +376,7 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, a
           float(len(incorrects))/num_episodes)
     if args.run_id is not None:
         write_eval_file(eval_path, corrects, incorrects, num_episodes)
+    return embs
 
 
 def initialise(included_type, dev=False):
@@ -349,7 +405,7 @@ def initialise(included_type, dev=False):
                         help='List denoting the sizes of hidden layers of the network.')
     parser.add_argument('--gamma', default=0.99, type=float,
                         help='Discount factor for rewards.')
-    parser.add_argument('--lr', default=0.01, type=float,
+    parser.add_argument('--lr', default=0.001, type=float,
                         help='Learning Rate')
     parser.add_argument('--update_freq', default=50, type=int,
                         help='The number of time steps between training steps.')
@@ -444,22 +500,34 @@ if __name__ == "__main__":
     query_type = 'located_in_the_administrative_territorial_entity'  # 'occupation'
     dataset, search_engine, nouns, reader, redis_server, args = initialise(query_type)
 
+    eval_dataset, eval_search_engine, eval_nouns = None, None, None
+    if args.eval:
+        # Evaluate on dev data
+        eval_dataset, eval_search_engine, eval_nouns = initialise(query_type, dev=True)
+
+    emb_dim = 50
+    # Initialise with train set
+    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim, dataset)
+
     if args.model_from_checkpoint is None:
         # Train agent
-        run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, args)
+        run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, embs, args,
+                  eval_dataset=eval_dataset, eval_search_engine=eval_search_engine,
+                  eval_nouns=eval_nouns)
 
     run_id = format_run_id(args)
     _, checkpoint_path, _ = format_experiment_paths(query_type, args.random_agent, run_id,
                                                     args.dirname)
     if args.model_from_checkpoint:
+        # Replace default formatted run_id with custom argument
         checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],
                                                   args.model_from_checkpoint)
     if checkpoint_path is not None:
+        # Use custom checkpoint ('final' by default)
         checkpoint_path += args.checkpoint_episode + '.ckpt'
 
     if args.eval:
-        # Evaluate on dev data
-        dataset, search_engine, nouns = initialise(query_type, dev=True)
-        run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, args,
-                  agent_from_checkpoint=checkpoint_path, dev=True)
+        # Run final evaluation
+        run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, embs, args,
+                  agent_from_checkpoint=checkpoint_path, dev=True, embs=embs)
 
