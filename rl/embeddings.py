@@ -2,6 +2,7 @@ import io
 import json
 import numpy as np
 import os
+import sys
 import unicodecsv
 
 from collections import defaultdict
@@ -49,7 +50,7 @@ def unit_sphere(var_matrix, norm=1.0, axis=1):
 
 
 class GloveLookup:
-    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower.json'):
+    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower_logN-n.json'):
         self.emb_dim = dim
         print('Loading GloVe...')
         vocab, _ = vocab_for_dataset(dataset)
