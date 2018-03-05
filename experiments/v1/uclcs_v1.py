@@ -19,10 +19,17 @@ def summary(configuration):
     return '_'.join([('%s=%s' % (k, v)) for (k, v) in kvs])
 
 
-def to_cmd(c, _path=None):
-    command = 'python3 -m rl.agent --lr {} --num_items_to_eval {} ' \
+def to_cmd(c, path=None):
+    command = 'python3 -m rl.agent --dirname cl1 --lr {} --gamma {} --update_freq {}' \
+              '--default_r {} --found_candidate_r {} --penalty {} --success_r {}' \
+              '--run_id 1 --num_items_to_eval 50000 ' \
               ''.format(c['lr'],
-                        c['nb_episodes'])
+                        c['gamma'],
+                        c['update_freq'],
+                        c['default_r'],
+                        c['found_candidate_r'],
+                        c['penalty'],
+                        c['success_r'])
     return command
 
 
@@ -41,12 +48,34 @@ def main(argv):
 
     args = argparser.parse_args(argv)
 
-    hyperparameters_space_1 = dict(
-        lr=[1e-4, 1e-3, 1e-2, 1e-1, 1e0, 1e1],
-        nb_episodes=[100, 1000, 10000, 30000]
+
+    default_hyperparameters = dict(
+        lr=[1e-3],
+        gamma=[0.99],
+        update_freq=[50],
+        default_r=[0.0],
+        found_candidate_r=[0.0],
+        penalty=[-1],
+        success_r=[1],
     )
 
-    configurations = list(cartesian_product(hyperparameters_space_1))
+    hyperparameters_space_1 = dict(
+        lr=[1e-4, 1e-3, 1e-2],
+        gamma=[0.8, 0.9, 0.95, 0.99],
+        update_freq=[10, 20, 50, 100],
+    )
+
+    hyperparameters_space_2 = dict(
+        default_r=[-0.1, 0.0],
+        found_candidate_r=[0.0, 0.1],
+        penalty=[-2, -1],
+        success_r=[1, 2],
+    )
+
+    current_experiment = dict()
+    current_experiment.update(default_hyperparameters)
+    current_experiment.update(hyperparameters_space_1)
+    configurations = list(cartesian_product(current_experiment))
 
     path = './logs/v1/uclcs_v1/'
 
