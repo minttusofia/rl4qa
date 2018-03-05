@@ -35,6 +35,7 @@ def format_run_id(args):
         run_id = ('-'.join(['l%i' % layer_size for layer_size in args.h_sizes])
                   + '-g' + str(args.gamma)
                   + '-lr' + str(args.lr)
+                  + '-uf' + str(args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
                   + '-max%i' % args.max_queries
@@ -132,12 +133,14 @@ def scalar_summaries(running_reward, ep_length, corrects, ep):
             'accuracy ({})'.format(accuracy_horizon): accuracy}
 
 
-def write_summary(summary_writer, episode, simple_values):
-    # TODO: add intermediate activations, action values
-    ep_summary = tf.Summary()
+def write_summary(summary_writer, episode, simple_values, summary_objects=None):
+    scalar_summary = tf.Summary()
     for k, v in simple_values.items():
-        ep_summary.value.add(simple_value=v, tag=k)
-    summary_writer.add_summary(ep_summary, episode)
+        scalar_summary.value.add(simple_value=v, tag=k)
+    summary_writer.add_summary(scalar_summary, episode)
+    if summary_objects is not None:
+        for s in summary_objects:
+            summary_writer.add_summary(s, episode)
     summary_writer.flush()
 
 
@@ -160,6 +163,7 @@ def new_or_existing_session(existing_sess=None):
 def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, dev=False, eval_dataset=None, eval_search_engine=None,
               eval_nouns=None, existing_session=None, total_accuracy_only=False, outer_e=None):
+    """Shared train/eval routine for REINFORCE agents, or eval for a random agent."""
     actions = actions_for_query_type(query_type)
     random.seed(args.seed)
     train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
@@ -185,11 +189,11 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
 
     # Only used when eval_dataset is not None
     eval_freq = 4000
-
+    checkpoint_freq = 500
     emb_dim = 50
 
     if args.run_id is not None:
-        run_id = format_run_id(args)  # args.run_id + '-lr' + str(lr)
+        run_id = format_run_id(args)
         summaries_path, checkpoint_path, eval_path = format_experiment_paths(
             query_type, run_id, args.dirname, dev, save_checkpoints=train)
         for path in [summaries_path, checkpoint_path]:
@@ -251,8 +255,9 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
             rc_answers, _ = get_cached_rc_answers(reader, query0, d0, redis_server)
         ans0 = rc_answers[0]
         # Initial state: pick action 0 automatically
-        s_prev = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
-        s_prev = np.hstack(embs.embed_state(s_prev))
+        s0 = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
+        s0 = np.hstack(embs.embed_state(s0))
+        s_prev = s0
         # Should first answer be checked?
         '''
         (r, correct_answers, incorrect_answers, incorrect_answers_this_episode,
@@ -325,14 +330,25 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
                 for ix, grad in enumerate(gradBuffer):
                     gradBuffer[ix] = grad * 0
 
-        if args.run_id is not None:
-            if total_accuracy_only:
-                write_summary(summary_writer, outer_e,
-                              {'total_dev_accuracy':
-                                   accuracy_from_history(corrects, e, horizon=None)})
-            else:
-                write_summary(summary_writer, e,
-                              scalar_summaries(ep_reward, ep_length, corrects, e))
+        if args.run_id is not None and not total_accuracy_only:
+            summary_objects = None
+            scalars = scalar_summaries(ep_reward, ep_length, corrects, e)
+            if e % len(dataset) == 0:  # Add action preferences for 1st item in dataset
+                action_prefs, action_prefs_t, activations = sess.run(
+                    [tf.summary.histogram('action_preferences_1st_question_item', agent.output,
+                                          collections=range(len(actions))),
+                     tf.summary.tensor_summary('action_preferences_1st_question_item',
+                                               agent.output)]
+                    + [tf.summary.histogram('hidden_{}'.format(l), agent.hidden[l])
+                       for l in len(h_sizes)],
+                    feed_dict={agent.state_in: [s0]})
+                action_hist = sess.run(tf.summary.histogram('action_history_1st_question_item',
+                                                            ep_history[:, 1],
+                                                            collections=range(max_queries)))
+                summary_objects = [action_prefs, action_prefs_t, activations, action_hist]
+                scalars['episode_reward (1st question item)'] = ep_reward
+
+            write_summary(summary_writer, e, scalars, summary_objects)
         reward_history.append(ep_reward)
         ep_length_history.append(len(ep_history))
 
@@ -342,7 +358,7 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
             print('  Reward history', np.mean(reward_history[-100:]))
             print('  Correct answers', len(corrects), float(len(corrects))/(e+1))
             print('  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
-        if (e + 1) % (2 * update_frequency) == 0 and train and args.run_id is not None:
+        if (e + 1) % checkpoint_freq == 0 and train and args.run_id is not None:
             print('Saving model to', checkpoint_path + str(e) + '.ckpt')
             saver.save(sess, checkpoint_path + str(e) + '.ckpt')
             last_ckpt_e = e
@@ -353,6 +369,12 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
             run_agent(query_type, eval_dataset, eval_search_engine, eval_nouns, reader,
                       redis_server, embs, args, dev=True, existing_session=sess,
                       total_accuracy_only=True, outer_e=e)
+
+    # Calculate total dev accuracy
+    if args.run_id is not None and total_accuracy_only:
+        write_summary(summary_writer, outer_e,
+                      {'total_dev_accuracy':
+                           accuracy_from_history(corrects, e, horizon=None)})
 
     # Save final model
     if train and args.run_id is not None:
@@ -466,9 +488,8 @@ def initialise(included_type, dev=False):
 
     # Number of instances to test (if > subset size, repeat items)
     num_items_to_eval = len(dataset)
-    if args.num_items_to_eval is not None:
+    if args.num_items_to_eval is not None and not dev:
         num_items_to_eval = min(len(dataset), args.num_items_to_eval)
-    print('Evaluating', num_items_to_eval, 'questions')
 
     one_type_only = True  # Set to True to evaluate templates on a single relation type
     one_type_dataset = []
@@ -480,9 +501,10 @@ def initialise(included_type, dev=False):
         dataset = one_type_dataset
 
     dataset = dataset[:num_items_to_eval]
+    print('Loaded', len(dataset), 'questions')
+
     if args.trim_index:
         nouns, search_engine = trim_index(dataset, nouns, search_engine)
-
     if dev:
         return dataset, search_engine, nouns
 
@@ -515,8 +537,7 @@ if __name__ == "__main__":
                   eval_nouns=eval_nouns)
 
     run_id = format_run_id(args)
-    _, checkpoint_path, _ = format_experiment_paths(query_type, args.random_agent, run_id,
-                                                    args.dirname)
+    _, checkpoint_path, _ = format_experiment_paths(query_type, run_id, args.dirname)
     if args.model_from_checkpoint:
         # Replace default formatted run_id with custom argument
         checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],
@@ -527,6 +548,6 @@ if __name__ == "__main__":
 
     if args.eval:
         # Run final evaluation
-        run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, embs, args,
-                  agent_from_checkpoint=checkpoint_path, dev=True, embs=embs)
+        run_agent(query_type, eval_dataset, eval_search_engine, eval_nouns, reader, redis_server,
+                  embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
 

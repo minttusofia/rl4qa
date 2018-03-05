@@ -21,10 +21,12 @@ class Reinforce(Agent):
         super(Reinforce, self).__init__(state_shape)
         # Policy network
         hidden = self.state_in
+        self.hidden = []
         for h_size in hidden_sizes:
             hidden = tf.contrib.slim.fully_connected(hidden, h_size,
                                                      biases_initializer=None,
                                                      activation_fn=tf.nn.relu)
+            self.hidden.append(hidden)
         self.output = tf.contrib.slim.fully_connected(hidden, action_shape,
                                                       activation_fn=tf.nn.softmax,
                                                       biases_initializer=None)
