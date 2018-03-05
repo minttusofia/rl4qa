@@ -49,7 +49,7 @@ def unit_sphere(var_matrix, norm=1.0, axis=1):
 
 
 class GloveLookup:
-    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_weights_lower.json'):
+    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower.json'):
         self.emb_dim = dim
         print('Loading GloVe...')
         vocab, _ = vocab_for_dataset(dataset)

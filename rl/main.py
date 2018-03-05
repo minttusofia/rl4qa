@@ -365,7 +365,6 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
     # TODO: save activations of hidden layers
     if args.save_embs:
         embs.save_history_to_csv()
-    # TODO: regularly evaluate on dev set
     if dev:
         print('Dev set accuracy:')
     else:
