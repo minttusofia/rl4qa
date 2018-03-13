@@ -19,10 +19,10 @@ def summary(configuration):
     return '_'.join([('%s=%s' % (k, v)) for (k, v) in kvs])
 
 
-def to_cmd(c, path=None):
-    command = 'python3 -m rl.agent --dirname cl1 --lr {} --gamma {} --update_freq {}' \
-              '--default_r {} --found_candidate_r {} --penalty {} --success_r {}' \
-              '--run_id 1 --num_items_to_eval 50000 ' \
+def to_cmd(c, _path=None):
+    command = 'sh ../python3.c -m rl.main --dirname 03_07/cl2 --lr {} --gamma {} --update_freq {} ' \
+              '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
+              '--run_id 1 --num_items_to_eval 50000 --redis_host cannon.cs.ucl.ac.uk' \
               ''.format(c['lr'],
                         c['gamma'],
                         c['update_freq'],
@@ -34,7 +34,7 @@ def to_cmd(c, path=None):
 
 
 def to_logfile(c, path):
-    outfile = "%s/uclcs_v1.%s.log" % (path, summary(c).replace("/", "_"))
+    outfile = os.path.join(path, "uclcs_v1.%s.log" % summary(c).replace("/", "_"))
     return outfile
 
 
@@ -112,8 +112,8 @@ def main(argv):
 #$ -o /dev/null
 #$ -e /dev/null
 #$ -t 1-{}
-#$ -l h_vmem=8G,tmem=8G
-#$ -l h_rt=10:00:00
+#$ -l h_vmem=12G,tmem=12G
+#$ -l h_rt=32:00:00
 
 cd /home/malakuij/rl4qa
 

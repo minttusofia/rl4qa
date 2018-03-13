@@ -165,7 +165,6 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
               eval_nouns=None, existing_session=None, total_accuracy_only=False, outer_e=None):
     """Shared train/eval routine for REINFORCE agents, or eval for a random agent."""
     actions = actions_for_query_type(query_type)
-    random.seed(args.seed)
     train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
 
     # Threshold above which to trust the reading comprehension module's answers
@@ -186,6 +185,7 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
 
     # Only used when random_agent=False
     h_sizes = args.h_sizes
+    print('Hidden sizes', h_sizes)
 
     # Only used when eval_dataset is not None
     eval_freq = 4000
@@ -340,7 +340,7 @@ def run_agent(query_type, dataset, search_engine, nouns, reader, redis_server, e
                      tf.summary.tensor_summary('action_preferences_1st_question_item',
                                                agent.output)]
                     + [tf.summary.histogram('hidden_{}'.format(l), agent.hidden[l])
-                       for l in len(h_sizes)],
+                       for l in range(len(h_sizes))],
                     feed_dict={agent.state_in: [s0]})
                 action_hist = sess.run(tf.summary.histogram('action_history_1st_question_item',
                                                             ep_history[:, 1],
@@ -417,6 +417,8 @@ def initialise(included_type, dev=False):
                         help='WikiHop version to use: one of {0, 1.1}.')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
+    parser.add_argument('--redis_host', type=str, default='localhost',
+                        help='Host of running redis instance (e.g. localhost, cannon).')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
@@ -511,7 +513,15 @@ def initialise(included_type, dev=False):
     reader = readers.reader_from_file('./rc/fastqa_reader')
     redis_server = None
     if args.cache:
-        redis_server = redis.StrictRedis(host='localhost', port=6379, db=0)
+        redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=0)
+        try:
+            redis_server.client_list()
+        except redis.exceptions.ConnectionError:
+            # Fall back to computing on-the-fly
+            print('No redis instance found at {}:6379, continuing without caching.'.format(
+                  args.redis_host))
+            args.cache = False
+            redis_server = None
 
     return dataset, search_engine, nouns, reader, redis_server, args
 
@@ -520,6 +530,9 @@ if __name__ == "__main__":
 
     query_type = 'located_in_the_administrative_territorial_entity'  # 'occupation'
     dataset, search_engine, nouns, reader, redis_server, args = initialise(query_type)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    tf.set_random_seed(args.seed)
 
     eval_dataset, eval_search_engine, eval_nouns = None, None, None
     if args.eval:
