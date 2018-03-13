@@ -37,10 +37,13 @@ the data. Use the subset flags from step 3.
 baseline on the data.
 
 #### Reinforce agent
-1. See Steps 1 - 3 under _Playground_ for setup.
+1. See Steps 1 - 3 under _Playground_ for setup. To evaluate on dev data, repeat Step 3 with 
+`--dev` to build a second index of dev data, or use the `--noeval` flag in Step 3 to work with 
+train 
+data only.
 2. To use caching, start redis-server as in step 2 in _Templates_, or use the `--nocache` flag in
  the next step.
 3. Run `python -m rl.agent` from the top level directory. Add `--random_agent` to evaluate a 
 random baseline agent, and/or `--run_id=<id>` to store checkpoints and TensorBoard summaries. Use
  the same subset flags (`--subset_size=<size>`, `--k_most_common_only=<k>`) that were used to build 
- the index.
+ the index. See `python -m rl.agent --help` for a comprehensive list of arguments.
