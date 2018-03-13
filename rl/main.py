@@ -28,18 +28,13 @@ def format_run_id(args):
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
-                  + '-max%i' % args.max_queries
-                  + '-s%i' % args.seed)
-
+                  + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
-        run_id = ('-'.join(['l%i' % layer_size for layer_size in args.h_sizes])
-                  + '-g' + str(args.gamma)
-                  + '-lr' + str(args.lr)
-                  + '-uf' + str(args.update_freq)
+        run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
+                  + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
-                  + '-max%i' % args.max_queries
-                  + '-s%i' % args.seed)
+                  + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
         run_id += '-' + args.run_id
     return run_id
