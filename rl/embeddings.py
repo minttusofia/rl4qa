@@ -52,7 +52,7 @@ def unit_sphere(var_matrix, norm=1.0, axis=1):
 class GloveLookup:
     def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower_logN-n.json'):
         self.emb_dim = dim
-        print('Loading GloVe...')
+        print('\nLoading GloVe...')
         vocab, _ = vocab_for_dataset(dataset)
         print('Train vocab length', len(vocab))
         if idf_from_file is not None and os.path.exists(idf_from_file):

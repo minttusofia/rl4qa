@@ -5,7 +5,7 @@ import time
 
 def trim_index(dataset, nouns, search_engine, keep_most=False):
     """Trim index and pre-extracted nouns to only include instances included in dataset."""
-    print('Trimming index...')
+    print('Trimming index...', end=' ')
     prev_time = time.time()
     # If most keys are kept, it's faster to delete unused than to copy shared
     if keep_most:
@@ -32,7 +32,7 @@ def trim_index(dataset, nouns, search_engine, keep_most=False):
         search_engine.sparse_for_q = one_type_sparse_for_q
         search_engine.vec_for_q = one_type_vec_for_q
     gc.collect()
-    print('Finished trimming ({} s)'.format(time.time() - prev_time))
+    print('({} s)'.format(time.time() - prev_time))
     return nouns, search_engine
 
 
