@@ -15,6 +15,7 @@ from ir.search_engine import SearchEngine
 from playground.datareader import format_paths
 from qa.nouns import pre_extract_nouns, SpacyNounParser, NltkNounParser
 from qa.question import Question
+from rl.actions import action_space_for_id
 from rc.utils import get_rc_answers, get_cached_rc_answers
 from rl.agent import Agent, RandomAgent, Reinforce
 from rl.embeddings import GloveLookup
@@ -40,35 +41,28 @@ def format_run_id(args):
     return run_id
 
 
-def format_experiment_paths(query_type, run_id, dirname, dev=False, save_checkpoints=True):
+def format_experiment_paths(query_type, actions, run_id, dirname, dev=False, save_checkpoints=True):
     checkpoint_path = None
     if dirname is not None:
         dirname += '/'
     else:
         dirname = ''
-    if save_checkpoints:
-        checkpoint_path = 'rl/checkpoints/{}{}/{}/model-'.format(dirname, query_type, run_id)
-    if dev:
-        summaries_path = 'rl/summaries/{}{}/dev/{}'.format(dirname, query_type, run_id)
-        eval_path = 'rl/eval/{}{}/dev/{}.txt'.format(dirname, query_type, run_id)
+
+    if actions is not None:
+        actions = '/' + actions
     else:
-        summaries_path = 'rl/summaries/{}{}/train/{}'.format(dirname, query_type, run_id)
-        eval_path = 'rl/eval/{}{}/train/{}.txt'.format(dirname, query_type, run_id)
+        actions = ''
+
+    if save_checkpoints:
+        checkpoint_path = 'rl/checkpoints/{}{}{}/{}/model-'.format(dirname, query_type,
+                                                                   actions, run_id)
+    if dev:
+        summaries_path = 'rl/summaries/{}{}{}/dev/{}'.format(dirname, query_type, actions, run_id)
+        eval_path = 'rl/eval/{}{}{}/dev/{}.txt'.format(dirname, query_type, actions, run_id)
+    else:
+        summaries_path = 'rl/summaries/{}{}{}/train/{}'.format(dirname, query_type, actions, run_id)
+        eval_path = 'rl/eval/{}{}{}/train/{}.txt'.format(dirname, query_type, actions, run_id)
     return summaries_path, checkpoint_path, eval_path
-
-
-def actions_for_query_type(query_type):
-    if query_type == 'located_in_the_administrative_territorial_entity':
-        actions = [['where is'],
-                   ['municipality of'],
-                   ['located'],
-                   ['what kind of socks does', 'wear']]
-    elif query_type == 'occupation':
-        actions = ['employer of',
-                   'colleague of',
-                   'known for',
-                   'work as']
-    return actions
 
 
 def discount_rewards(r, gamma):
@@ -208,7 +202,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     Returns:
         embs: Initialised embeddings are returned for reuse.
     """
-    actions = actions_for_query_type(args.qtype)
+    action_space_id = args.actions
+    if args.actions is None:
+        action_space_id = args.qtype
+    actions = action_space_for_id(action_space_id)
     train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
 
     # Threshold above which to trust the reading comprehension module's answers
@@ -239,7 +236,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if args.run_id is not None:
         run_id = format_run_id(args)
         summaries_path, checkpoint_path, eval_path = format_experiment_paths(
-            args.qtype, run_id, args.dirname, dev, save_checkpoints=train)
+            args.qtype, args.actions, run_id, args.dirname, dev, save_checkpoints=train)
         for path in [summaries_path, checkpoint_path]:
             if path is not None and not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
@@ -249,9 +246,14 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         tf.reset_default_graph()
         tf.set_random_seed(args.seed)
 
-    # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1 + history
-    #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim + TODO
-    s_size = 5 * emb_dim
+    num_state_parts = 5
+    # TODO: allow sets of types
+    types_in_state = args.qtype == 'all'
+    if types_in_state:
+        num_state_parts += 1
+    # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
+    #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim, TODO
+    s_size = num_state_parts * emb_dim
     # TODO: add backtracking action
     a_size = len(actions)
 
@@ -293,7 +295,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     for e in range(num_episodes):
         question = Question(dataset[e % len(dataset)])
         verbose_print(2, args.verbose, e, ':', question.query)
-        _, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
+        q_type, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
         # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
         query0 = form_query(actions[0], subj0)
         # First query won't have been asked from top doc
@@ -309,6 +311,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         ans0 = rc_answers[0]
         # Initial state: pick action 0 automatically
         s0 = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
+        if types_in_state:
+            s0.append(q_type.replace('_', ' '))
         s0 = np.hstack(embs.embed_state(s0))
         s_prev = s0
         # Should first answer be checked?
@@ -349,6 +353,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                              args.found_candidate_r, args.penalty, args.success_r, args.verbose))
             # TODO: alternative: form_query(actions[a_t], subj_t)
             s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
+            if types_in_state:
+                s_t.append(q_type.replace('_', ' '))
             s_t = np.hstack(embs.embed_state(s_t))
 
             history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
@@ -492,9 +498,12 @@ def parse_args():
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
+
     parser.add_argument('--qtype', type=str,
                         default='located_in_the_administrative_territorial_entity',
                         help='WikiHop question type to include. Defines action space of agent.')
+    parser.add_argument('--actions', type=str, default=None,
+                        help='ID of action space to use. If not set, use default for query type.')
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')
@@ -576,9 +585,10 @@ def initialise(args, dev=False):
     if args.num_items_to_eval is not None and not dev:
         num_items_to_eval = min(len(dataset), args.num_items_to_eval)
 
-    one_type_only = True  # Set to True to evaluate templates on a single relation type
-    one_type_dataset = []
+    # TODO: allow sets of types
+    one_type_only = args.qtype != 'all'
     if one_type_only:
+        one_type_dataset = []
         for q in dataset:
             if q['query'].split()[0] == args.qtype:
                 one_type_dataset.append(q)
