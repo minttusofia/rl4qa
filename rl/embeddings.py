@@ -85,6 +85,7 @@ class GloveLookup:
         self.OOV[0] = 1
         print(self.lookup[:len(self.word2idx), :].shape)
         self.lookup = unit_sphere(self.lookup[:len(self.word2idx), :])
+        self.history_len = 1000
         self.state_str_history = []
         self.state_history = []
         self.avg_state_history = []
@@ -126,16 +127,23 @@ class GloveLookup:
         words = doc.split()
         return np.mean([self.lookup_word(w) for w in words], axis=0)
 
-    def embed_state(self, s):
+    def embed_state(self, s, store_naive=False):
         tfs = []
         for elem in s:
             tfs.append(defaultdict(int))
             for word in elem.split():
                 tfs[-1][word.lower()] += 1
-        tf_idf_state = np.stack([self.lookup_doc_tf_idf(s[e], tfs[e]) for e in range(len(s))],
-                                axis=0).flatten()
-        naive_state = np.stack([self.lookup_doc_avg(elem) for elem in s], axis=0).flatten()
+        emb_elements = [self.lookup_doc_tf_idf(s[e], tfs[e]) for e in range(len(s))]
+        if np.any([type(component) == np.float64 or len(component) != self.emb_dim
+                   for component in emb_elements]):
+            print('State element has incorrect format:\n', s, '\n', emb_elements)
+        tf_idf_state = np.stack(emb_elements, axis=0).flatten()
+        if store_naive:
+            naive_state = np.stack([self.lookup_doc_avg(elem) for elem in s], axis=0).flatten()
+            self.avg_state_history.append(list(naive_state))
+            self.avg_state_history = self.avg_state_history[-self.history_len:]
         self.state_history.append(list(tf_idf_state))
-        self.avg_state_history.append(list(naive_state))
+        self.state_history = self.state_history[-self.history_len:]
         self.state_str_history.append(s)
+        self.state_str_history = self.state_str_history[-self.history_len:]
         return tf_idf_state

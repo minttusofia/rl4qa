@@ -29,12 +29,14 @@ def format_run_id(args):
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
+                  + '-dev{}'.format(args.num_items_eval)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
         run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
                   + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
+                  + '-train{}-dev{}'.format(args.num_items_train, args.num_items_eval)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
         run_id += '-' + args.run_id
@@ -56,11 +58,11 @@ def format_experiment_paths(query_type, actions, run_id, dirname, dev=False, sav
     if save_checkpoints:
         checkpoint_path = 'rl/checkpoints/{}{}{}/{}/model-'.format(dirname, query_type,
                                                                    actions, run_id)
+    # Use same path for train and dev as names of plots written to specify train/dev
+    summaries_path = 'rl/summaries/{}{}{}/train/{}'.format(dirname, query_type, actions, run_id)
     if dev:
-        summaries_path = 'rl/summaries/{}{}{}/dev/{}'.format(dirname, query_type, actions, run_id)
         eval_path = 'rl/eval/{}{}{}/dev/{}.txt'.format(dirname, query_type, actions, run_id)
     else:
-        summaries_path = 'rl/summaries/{}{}{}/train/{}'.format(dirname, query_type, actions, run_id)
         eval_path = 'rl/eval/{}{}{}/train/{}.txt'.format(dirname, query_type, actions, run_id)
     return summaries_path, checkpoint_path, eval_path
 
@@ -94,8 +96,8 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
             incorrect_answers_this_episode.append(answer.text.lower())
             if e not in incorrects:
                 incorrects.append(e)
-        elif is_last_action:
-            reward = penalty
+    elif is_last_action:
+        reward = penalty
 
     return reward, incorrect_answers_this_episode, corrects, incorrects
 
@@ -157,12 +159,6 @@ def verbose_print(verbosity, verbose_level, *args):
         print()
 
 
-def new_or_existing_session(existing_sess=None):
-    if existing_sess is not None:
-        return existing_sess
-    return tf.Session()
-
-
 def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, agent=None, dev=False, eval_dataset=None,
               eval_search_engine=None, eval_nouns=None, existing_session=None,
@@ -212,12 +208,12 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     confidence_threshold = args.conf_threshold
     max_queries = args.max_queries
 
-    if dev or args.num_items_to_eval is None:
+    if dev or args.num_items_train is None:
         # Always evaluate full set when dev=True
         num_episodes = len(dataset)
     else:
         # Repeat if num_episodes > len(dataset)
-        num_episodes = args.num_items_to_eval
+        num_episodes = args.num_items_train
 
     # Only used when train=True
     gamma = args.gamma
@@ -267,11 +263,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
     corrects, incorrects, incorrect_answers_this_episode = [], [], []
 
-    if existing_session is None:
-        sess = tf.Session()
-    else:
-        sess = existing_session
-
+    sess = tf.Session() if existing_session is None else existing_session
     sess.run(tf.global_variables_initializer())
     if args.run_id is not None:
         summary_writer = tf.summary.FileWriter(summaries_path, sess.graph)
@@ -296,6 +288,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         question = Question(dataset[e % len(dataset)])
         verbose_print(2, args.verbose, e, ':', question.query)
         q_type, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
+        if subj0 == '':  # WH_dev_1559 and WH_dev_5113 have no question subject
+            print(question.id, 'has no question subject')
+            continue
         # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
         query0 = form_query(actions[0], subj0)
         # First query won't have been asked from top doc
@@ -313,7 +308,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         s0 = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
         if types_in_state:
             s0.append(q_type.replace('_', ' '))
-        s0 = np.hstack(embs.embed_state(s0))
+        embedded_state = embs.embed_state(s0)
+        if embedded_state.shape != (300,):
+            print(embedded_state.shape)
+        s0 = embedded_state  # np.hstack(embedded_state)
         s_prev = s0
         # Should first answer be checked?
         '''
@@ -355,7 +353,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
             if types_in_state:
                 s_t.append(q_type.replace('_', ' '))
-            s_t = np.hstack(embs.embed_state(s_t))
+            s_t = embs.embed_state(s_t) # np.hstack(embs.embed_state(s_t))
 
             history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
             if t == 0:
@@ -370,6 +368,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
                 subj_t = nouns[question.id][top_idx][rand_draw].lower()
             ep_reward += r
+            verbose_print(2, args.verbose, 'Redeived reward', r)
             ep_length = t
             if r == 1:
                 # TODO: collect aggregate action history data
@@ -423,7 +422,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                           '  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
 
         # Save to checkpoint and evaluate accuracy on dev set
-        if eval_dataset is not None and (e + 1) % eval_freq == 0:
+        if eval_dataset is not None and (e + 1) % eval_freq == 0 and args.run_id is not None:
             checkpoint_to_load = None  # Use None as checkpoint when evaluating random agent
             if not args.random_agent:
                 checkpoint_to_write = checkpoint_path + '{}.ckpt'.format(e)
@@ -460,10 +459,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     # TODO: save activations of hidden layers
     if args.save_embs:
         embs.save_history_to_csv()
-    if dev:
-        print('\nDev set accuracy:')
-    else:
-        print('\nTrain set accuracy:')
+    print('\nDev set accuracy:' if dev else '\nTrain set accuracy:')
     print('Correct answers final', len(corrects), '/', num_episodes,
           float(len(corrects))/num_episodes)
     print('Incorrect answers final', len(incorrects), '/', num_episodes,
@@ -481,11 +477,15 @@ def parse_args():
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--verbose_weights', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out model weights when saving or loading.')
+
     parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
-    parser.add_argument('--num_items_to_eval', default=None, type=int,
-                        help='If set, the number of instances to evaluate. If > subset_size, '
+    parser.add_argument('--num_items_train', default=None, type=int,
+                        help='If set, the number of instances to train on. If > subset_size, '
                              'iterate over data more than once.')
+    parser.add_argument('--num_items_eval', default=None, type=int,
+                        help='If set, the number of dev instances to evaluate. Capped at dev size.')
+
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
     parser.add_argument('--wikihop_version', type=str, default='1.1',
@@ -558,13 +558,20 @@ def set_random_seed(seed):
     tf.set_random_seed(seed)
 
 
+def clean_missing_subjects(dataset):
+    items_to_remove = ['WH_dev_1559','WH_dev_5113']  # These have no question subject
+    i = 0
+    while i < len(dataset):
+        if dataset[i]['id'] in items_to_remove:
+            del dataset[i]
+        else:
+            i += 1
+
+
 def initialise(args, dev=False):
 
     subset_id, data_path, index_filename, nouns_path = format_paths(args, dev)
-    if dev:
-        print('\nInitialising dev data...')
-    else:
-        print('\nInitialising train data...')
+    print('\nInitialising dev data...' if dev else '\nInitialising train data...')
     with open(data_path) as dataset_file:
         dataset = json.load(dataset_file)
     if args.subset_size is not None:
@@ -580,10 +587,15 @@ def initialise(args, dev=False):
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
 
-    # Number of instances to test (if > subset size, repeat items)
-    num_items_to_eval = len(dataset)
-    if args.num_items_to_eval is not None and not dev:
-        num_items_to_eval = min(len(dataset), args.num_items_to_eval)
+    if dev:
+        # WH_dev_1559 and WH_dev_5113 have no question subject
+        clean_missing_subjects(dataset)
+    # Number of instances to include (if train and > subset size, repeat items)
+    num_items = len(dataset)
+    if args.num_items_train is not None and not dev:
+        num_items = args.num_items_train
+    elif args.num_items_eval is not None and dev:
+        num_items = max(len(dataset), args.num_items_eval)
 
     # TODO: allow sets of types
     one_type_only = args.qtype != 'all'
@@ -595,12 +607,13 @@ def initialise(args, dev=False):
 
         dataset = one_type_dataset
 
-    dataset = dataset[:num_items_to_eval]
+    dataset = dataset[:num_items]
     print('Loaded', len(dataset), 'questions')
 
     if args.trim_index:
         nouns, search_engine = trim_index(dataset, nouns, search_engine)
     if dev:
+
         return dataset, search_engine, nouns
 
     print('Initialising reader...')

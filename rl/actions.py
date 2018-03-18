@@ -10,7 +10,8 @@ def action_space_for_id(actions_id):
              ['colleague of'],
              ['known for'],
              ['work as']],
-        'all-small':
+
+        'all-30':  # subset of 30 of all-70
             [
                 ["what is"],
                 ["where is"],
@@ -54,7 +55,7 @@ def action_space_for_id(actions_id):
                 ["when was", "published"],
             ],
 
-        'all':  # from baselines/template_list_70.json
+        'all-70':  # from baselines/template_list_70.json
             [
                 ["what is"],
                 ["where is"],
