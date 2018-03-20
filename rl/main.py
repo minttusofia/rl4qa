@@ -25,18 +25,23 @@ from shared.utils import trim_index, form_query, get_document_for_query
 def format_run_id(args):
     if args.run_id is None:
         return None
+    dev_sizes = '' if args.num_items_eval is None else '-dev{}'.format(args.num_items_eval)
+    dev_sizes += ('' if args.num_items_final_eval is None
+                   else '-final{}'.format(args.num_items_final_eval))
+    dataset_sizes = ('' if args.num_items_train is None else '-train{}'.format(args.num_items_train)
+                     + dev_sizes)
     if args.random_agent:
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
-                  + '-dev{}'.format(args.num_items_eval)
+                  + '{}'.format(dev_sizes)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
         run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
                   + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
-                  + '-train{}-dev{}'.format(args.num_items_train, args.num_items_eval)
+                  + '{}'.format(dataset_sizes)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
         run_id += '-' + args.run_id
@@ -116,12 +121,17 @@ def accuracy_from_history(corrects, ep, horizon=100):
     return accuracy
 
 
-def scalar_summaries(running_reward, ep_length, corrects, ep):
+def scalar_summaries(running_reward, ep_length, corrects, ep, dev=False):
     accuracy_horizon = 100
     accuracy = accuracy_from_history(corrects, ep, accuracy_horizon)
-    return {'reward': running_reward,
-            'episode_length': ep_length,
-            'accuracy ({})'.format(accuracy_horizon): accuracy}
+    if dev:
+        return {'reward, dev': running_reward,
+                'episode_length, dev': ep_length,
+                'accuracy ({}), dev'.format(accuracy_horizon): accuracy}
+    else:
+        return {'reward': running_reward,
+                'episode_length': ep_length,
+                'accuracy ({})'.format(accuracy_horizon): accuracy}
 
 
 def write_summary(summary_writer, episode, simple_values, summary_objects=None):
@@ -162,7 +172,7 @@ def verbose_print(verbosity, verbose_level, *args):
 def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, agent=None, dev=False, eval_dataset=None,
               eval_search_engine=None, eval_nouns=None, existing_session=None,
-              total_accuracy_only=False, outer_e=None):
+              total_accuracy_only=False, outer_e=None, summary_writer=None):
     """Shared train/eval routine for REINFORCE agents, or eval for a random agent.
 
     Use cases
@@ -195,8 +205,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             performance evaluation.
         existing_session: If None, open a new session. Else, use the existing session.
 
-    Returns:
-        embs: Initialised embeddings are returned for reuse.
+        total_accuracy_only: If True, write summaries only about total accuracy on the dataset.
+        outer_e: If set, use as timestamp (episode number) for summaries instead of starting at 0.
+        summary_writer: If set, use existing summary_writer (to append to existing summary file)
+            instead of creating a new one.
     """
     action_space_id = args.actions
     if args.actions is None:
@@ -266,7 +278,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     sess = tf.Session() if existing_session is None else existing_session
     sess.run(tf.global_variables_initializer())
     if args.run_id is not None:
-        summary_writer = tf.summary.FileWriter(summaries_path, sess.graph)
+        summary_writer = (tf.summary.FileWriter(summaries_path, sess.graph)
+                          if summary_writer is None else summary_writer)
         if not args.random_agent:  # no variables to save/retrieve for random agent
             # saver = tf.train.Saver()
             if agent_from_checkpoint is not None:
@@ -367,8 +380,11 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 # Pick a noun phrase at random from top document
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
                 subj_t = nouns[question.id][top_idx][rand_draw].lower()
+                verbose_print(2, args.verbose, 'Conf', ans_t.score, '<', confidence_threshold,
+                              ': picked', subj_t, '(', rand_draw, ') at random')
             ep_reward += r
-            verbose_print(2, args.verbose, 'Redeived reward', r)
+            if r != args.default_r:
+                verbose_print(2, args.verbose, 'Received reward', r)
             ep_length = t
             if r == 1:
                 # TODO: collect aggregate action history data
@@ -385,6 +401,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 gradBuffer[idx] += grad
 
             if e % update_frequency == 0 and e != 0:
+                verbose_print(2, args.verbose, e, 'Updating policy')
                 feed_dict = dict(zip(agent.gradient_holders, gradBuffer))
                 _ = sess.run(agent.update_batch, feed_dict=feed_dict)
                 for ix, grad in enumerate(gradBuffer):
@@ -392,7 +409,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
         if args.run_id is not None and not total_accuracy_only and not args.random_agent:
             summary_objects = None
-            scalars = scalar_summaries(ep_reward, ep_length, corrects, e)
+            scalars = scalar_summaries(ep_reward, ep_length, corrects, e, dev=dev)
             if e % len(dataset) == 0:  # Add action preferences for 1st item in dataset
                 summary_objects = sess.run(
                     [tf.summary.histogram('action_preferences_1st_question_item', agent.output,
@@ -422,7 +439,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                           '  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
 
         # Save to checkpoint and evaluate accuracy on dev set
-        if eval_dataset is not None and (e + 1) % eval_freq == 0 and args.run_id is not None:
+        if eval_dataset is not None and e % eval_freq == 0 and args.run_id is not None:
             checkpoint_to_load = None  # Use None as checkpoint when evaluating random agent
             if not args.random_agent:
                 checkpoint_to_write = checkpoint_path + '{}.ckpt'.format(e)
@@ -433,7 +450,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(e, ': Running intermediate evaluation step')
             run_agent(eval_dataset, eval_search_engine, eval_nouns, reader, redis_server, embs,
                       args, agent=agent, agent_from_checkpoint=checkpoint_to_load, dev=True,
-                      existing_session=sess, total_accuracy_only=True, outer_e=e)
+                      existing_session=sess, total_accuracy_only=True, outer_e=e,
+                      summary_writer=summary_writer)
 
         # Save to checkpoint without eval
         elif (e + 1) % checkpoint_freq == 0 and train and args.run_id is not None:
@@ -466,7 +484,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
           float(len(incorrects))/num_episodes, '\n')
     if args.run_id is not None:
         write_eval_file(eval_path, corrects, incorrects, num_episodes)
-    return embs
 
 
 def parse_args():
@@ -484,7 +501,11 @@ def parse_args():
                         help='If set, the number of instances to train on. If > subset_size, '
                              'iterate over data more than once.')
     parser.add_argument('--num_items_eval', default=None, type=int,
-                        help='If set, the number of dev instances to evaluate. Capped at dev size.')
+                        help='If set, the number of dev instances to evaluate at intermediate '
+                             'checkpoints. Capped at dev size.')
+    parser.add_argument('--num_items_final_eval', default=None, type=int,
+                        help='If set, the number of dev instances to evaluate for final '
+                             'accuracy. Capped at dev size.')
 
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
@@ -569,7 +590,6 @@ def clean_missing_subjects(dataset):
 
 
 def initialise(args, dev=False):
-
     subset_id, data_path, index_filename, nouns_path = format_paths(args, dev)
     print('\nInitialising dev data...' if dev else '\nInitialising train data...')
     with open(data_path) as dataset_file:
@@ -594,8 +614,14 @@ def initialise(args, dev=False):
     num_items = len(dataset)
     if args.num_items_train is not None and not dev:
         num_items = args.num_items_train
-    elif args.num_items_eval is not None and dev:
-        num_items = max(len(dataset), args.num_items_eval)
+    elif dev:
+        if args.num_items_eval is not None:
+            max_items_eval = (max(args.num_items_eval, args.num_items_final_eval)
+                              if args.num_items_final_eval is not None
+                              else args.num_items_eval)
+            num_items = min(len(dataset), max_items_eval)
+        elif args.num_items_final_eval is not None:
+            num_items = min(len(dataset), args.num_items_final_eval)
 
     # TODO: allow sets of types
     one_type_only = args.qtype != 'all'
@@ -613,7 +639,6 @@ def initialise(args, dev=False):
     if args.trim_index:
         nouns, search_engine = trim_index(dataset, nouns, search_engine)
     if dev:
-
         return dataset, search_engine, nouns
 
     print('Initialising reader...')
@@ -650,11 +675,11 @@ if __name__ == "__main__":
     if args.model_from_checkpoint is None:
         # Train agent
         run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
-                  eval_dataset=eval_dataset, eval_search_engine=eval_search_engine,
-                  eval_nouns=eval_nouns)
+                  eval_dataset=eval_dataset[:args.num_items_eval],
+                  eval_search_engine=eval_search_engine, eval_nouns=eval_nouns)
 
     run_id = format_run_id(args)
-    _, checkpoint_path, _ = format_experiment_paths(args.qtype, run_id, args.dirname)
+    _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, run_id, args.dirname)
     if args.model_from_checkpoint:
         # Replace default formatted run_id with custom argument
         checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],
@@ -665,6 +690,6 @@ if __name__ == "__main__":
 
     if args.eval:
         # Run final evaluation
-        run_agent(eval_dataset, eval_search_engine, eval_nouns, reader, redis_server,
-                  embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
+        run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
+                  redis_server, embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
 
