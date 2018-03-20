@@ -2,7 +2,6 @@ import io
 import json
 import numpy as np
 import os
-import sys
 import unicodecsv
 
 from collections import defaultdict
@@ -28,17 +27,11 @@ def idf_for_dataset(dataset, use_lowercase=True):
                 if use_lowercase:
                     word = word.lower()
                 df[word] += 1
-    '''for template in templates:
-        for part in template:
-            for word in part.split():
-                if use_lowercase:
-                    word = word.lower()
-                df[word] += 1'''
-    total_num_words = sum(df.values())
+    num_total_words = sum(df.values())
     for word in df.keys():
         # idf = log(N/n_t)
-        df[word] = np.log(total_num_words/df[word])
-    return defaultdict(lambda: total_num_words/1., df), total_num_words
+        df[word] = np.log(num_total_words/df[word])
+    return defaultdict(lambda: num_total_words/1., df), num_total_words
 
 
 def unit_sphere(var_matrix, norm=1.0, axis=1):
@@ -50,8 +43,13 @@ def unit_sphere(var_matrix, norm=1.0, axis=1):
 
 
 class GloveLookup:
-    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower_logN-n.json'):
+    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower_logN-n.json',
+                 oov_from_file='rl/oov_embs.json'):
         self.emb_dim = dim
+        # IDF weight for randomly initialised embeddings for train time OOV words (low even if rare)
+        self.rand_init_idf = 1.
+        # IDF weight for test time OOV words (low even if rare)
+        self.oov_idf = 1.
         print('\nLoading GloVe...')
         vocab, _ = vocab_for_dataset(dataset)
         print('Train vocab length', len(vocab))
@@ -60,7 +58,7 @@ class GloveLookup:
             print('Loaded IDF weights from', idf_from_file)
             stored_idf = json.load(io.open(idf_from_file, 'r', encoding='utf-8'))
             num_total_words, idf_weights = stored_idf[0], stored_idf[1]
-            self.idf = defaultdict(lambda: np.log(num_total_words/1))
+            self.idf = defaultdict(lambda: num_total_words/1.)
             self.idf.update(idf_weights)
         else:
             print('Computing IDF for %i question items...' % len(dataset))
@@ -70,19 +68,38 @@ class GloveLookup:
                 json.dump(idf_with_num_total, f, ensure_ascii=False)
 
         self.word2idx, self.lookup = embeddings.glove.load_glove(open(path, 'rb'))
-        num_OOV_words = 0
+        use_existing_oov_embs = oov_from_file is not None and os.path.exists(oov_from_file)
+        num_glove_words = len(self.word2idx)
+        self.initialised_oov_words = {}
+        if use_existing_oov_embs:
+            initialised_oov = json.load(io.open(oov_from_file, 'r', encoding='utf8'))
+            self.oov_words = set(initialised_oov.keys())
+        else:
+            oov_embs = {}
         for word in vocab:
             if word.lower() not in self.word2idx:
+                self.oov_words.add(word.lower())
                 idx = len(self.word2idx)
-                num_OOV_words += 1
                 self.word2idx[word.lower()] = idx
                 if idx > len(self.lookup) - 1:
                     self.lookup.resize([self.lookup.shape[0] + 50000, self.lookup.shape[1]])
-                self.lookup[idx] = np.random.normal(0.0, 1.0, size=[1, dim])
+                if use_existing_oov_embs:
+                    self.lookup[idx] = np.array(initialised_oov[word.lower()])
+                else:
+                    new_random_normal = np.random.normal(0.0, 1.0, size=[1, dim])
+                    self.lookup[idx] = new_random_normal
+                    oov_embs[word.lower()] = new_random_normal.tolist()
+        if not use_existing_oov_embs:
+            with io.open(oov_from_file, 'w', encoding='utf8') as f:
+                json.dump(oov_embs, f, ensure_ascii=False)
+        for word in self.initialised_oov_words:
+            # Override idf dictionary default log(N/n_t)
+            self.idf[word] = self.rand_init_idf
+
         # TODO: learn linear transformation for task
-        print('Initialised', num_OOV_words, 'new words')
-        self.OOV = np.zeros(dim)
-        self.OOV[0] = 1
+        print('Initialised', len(self.word2idx) - num_glove_words, 'new words')
+        self.oov = np.zeros(dim)
+        self.oov[0] = 1
         print(self.lookup[:len(self.word2idx), :].shape)
         self.lookup = unit_sphere(self.lookup[:len(self.word2idx), :])
         self.history_len = 1000
@@ -107,21 +124,20 @@ class GloveLookup:
             for s in self.state_str_history:
                 f.write(str(s) + '\n')
 
+    def lookup_word_idf(self, word):
+        if word.lower() in self.word2idx:
+            return self.lookup[self.word2idx[word.lower()]] * self.idf[word.lower()]
+        # OOV words should have low IDF despite being rare
+        return self.oov * self.oov_idf
+
     def lookup_word(self, word):
         if word.lower() in self.word2idx:
             return self.lookup[self.word2idx[word.lower()]]
-        return self.OOV
+        return self.oov
 
     def lookup_doc_tf_idf(self, doc, tf):
         words = doc.split()
-        '''for w in words:
-            if w.lower() not in tf:
-                print(w.lower(), 'not in tf')
-            if w.lower() not in self.idf:
-                print(doc)
-                print(w.lower(), 'not in idf')'''
-        return np.mean([tf[w.lower()] * self.idf[w.lower()] * self.lookup_word(w) for w in words],
-                       axis=0)
+        return np.mean([tf[w.lower()] * self.lookup_word_idf(w) for w in words], axis=0)
 
     def lookup_doc_avg(self, doc):
         words = doc.split()
