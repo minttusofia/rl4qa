@@ -386,7 +386,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             if r != args.default_r:
                 verbose_print(2, args.verbose, 'Received reward', r)
             ep_length = t
-            if r == 1:
+            if r == args.success_r:
                 # TODO: collect aggregate action history data
                 verbose_print(1, args.verbose, '\tAction history:', ep_history[:, 1])
                 break

@@ -7,7 +7,10 @@ from jack.core.data_structures import Answer
 
 def get_rc_answers(reader, queries, documents):
     if type(queries) != list:
-        return reader([QASetting(question=queries, support=[documents])])
+        answer = reader([QASetting(question=queries, support=[documents])])
+        if type(answer[0]) == list:
+            answer = answer[0]
+        return answer
     questions = []
     for q in range(len(queries)):
         questions.append(QASetting(question=queries[q], support=[documents[q]]))

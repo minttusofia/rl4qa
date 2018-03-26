@@ -20,9 +20,10 @@ def summary(configuration):
 
 
 def to_cmd(c, _path=None):
-    command = 'sh ../python3.c -m rl.main --dirname 03_07/cl2 --lr {} --gamma {} --update_freq {} ' \
+    command = 'sh ../python3.c -m rl.main --dirname 03_22/cl2 --lr {} --gamma {} --update_freq {} ' \
               '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
-              '--run_id 1 --num_items_to_eval 50000 --redis_host cannon.cs.ucl.ac.uk' \
+              '--qtype all --actions all-30 --verbose 1 ' \
+              '--run_id 1 --num_items_train 50000 --num_items_eval 500 --redis_host cannon.cs.ucl.ac.uk' \
               ''.format(c['lr'],
                         c['gamma'],
                         c['update_freq'],
@@ -52,7 +53,7 @@ def main(argv):
     default_hyperparameters = dict(
         lr=[1e-3],
         gamma=[0.99],
-        update_freq=[50],
+        update_freq=[20],
         default_r=[0.0],
         found_candidate_r=[0.0],
         penalty=[-1],
@@ -70,11 +71,12 @@ def main(argv):
         found_candidate_r=[0.0, 0.1],
         penalty=[-2, -1],
         success_r=[1, 2],
+        gamma=[0.8, 0.9]
     )
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(hyperparameters_space_1)
+    current_experiment.update(hyperparameters_space_2)
     configurations = list(cartesian_product(current_experiment))
 
     path = './logs/v1/uclcs_v1/'
@@ -112,7 +114,7 @@ def main(argv):
 #$ -o /dev/null
 #$ -e /dev/null
 #$ -t 1-{}
-#$ -l h_vmem=12G,tmem=12G
+#$ -l h_vmem=16G,tmem=16G
 #$ -l h_rt=32:00:00
 
 cd /home/malakuij/rl4qa
