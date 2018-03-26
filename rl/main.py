@@ -30,6 +30,7 @@ def format_run_id(args):
                    else '-final{}'.format(args.num_items_final_eval))
     dataset_sizes = ('' if args.num_items_train is None else '-train{}'.format(args.num_items_train)
                      + dev_sizes)
+    baseline_str = '' if args.baseline is None else '-{}bl'.format(args.baseline)
     if args.random_agent:
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
@@ -41,6 +42,7 @@ def format_run_id(args):
                   + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
+                  + '{}'.format(baseline_str)
                   + '{}'.format(dataset_sizes)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
@@ -254,6 +256,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         tf.reset_default_graph()
         tf.set_random_seed(args.seed)
 
+    if train:
+        # Only used when baseline is not None
+        baseline_r = tf.Variable(0., trainable=False)
+
     num_state_parts = 5
     # TODO: allow sets of types
     types_in_state = args.qtype == 'all'
@@ -322,8 +328,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         if types_in_state:
             s0.append(q_type.replace('_', ' '))
         embedded_state = embs.embed_state(s0)
-        if embedded_state.shape != (300,):
-            print(embedded_state.shape)
         s0 = embedded_state  # np.hstack(embedded_state)
         s_prev = s0
         # Should first answer be checked?
@@ -392,6 +396,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 break
 
         if train:
+            # TODO: baseline when non-terminal rewards != 0
+            if args.baseline == 'mean':
+                ep_history[-1, 2] -= sess.run(baseline_r)
+                baseline_r = ep_history[-1, 2] * 1./(e+1.) + baseline_r * e/(e+1.)
             ep_history[:, 2] = discount_rewards(ep_history[:, 2], gamma)
             feed_dict = {agent.reward_holder: ep_history[:, 2],
                          agent.action_holder: ep_history[:, 1],
@@ -537,6 +545,8 @@ def parse_args():
     parser.add_argument('--max_queries', default=25, type=int,
                         help='Maximum number of queries to allow per episode.')
 
+    parser.add_argument('--baseline', default=None, type=str,
+                        help='Baseline reward to use for policy updates. One of [None|mean].')
     parser.add_argument('--default_r', default=0., type=float,
                         help='Reward for not finding the correct answer or an answer candidate '
                              'at a non-terminal time step.')
@@ -663,10 +673,11 @@ if __name__ == "__main__":
     set_random_seed(args.seed)
     dataset, search_engine, nouns, reader, redis_server = initialise(args)
 
-    eval_dataset, eval_search_engine, eval_nouns = None, None, None
+    interm_eval_dataset, eval_search_engine, eval_nouns = None, None, None
     if args.eval:
         # Evaluate on dev data
         eval_dataset, eval_search_engine, eval_nouns = initialise(args, dev=True)
+        interm_eval_dataset = eval_dataset[:args.num_items_eval]
 
     emb_dim = 50
     # Initialise with train set
@@ -675,8 +686,8 @@ if __name__ == "__main__":
     if args.model_from_checkpoint is None:
         # Train agent
         run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
-                  eval_dataset=eval_dataset[:args.num_items_eval],
-                  eval_search_engine=eval_search_engine, eval_nouns=eval_nouns)
+                  eval_dataset=interm_eval_dataset, eval_search_engine=eval_search_engine,
+                  eval_nouns=eval_nouns)
 
     run_id = format_run_id(args)
     _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, run_id, args.dirname)

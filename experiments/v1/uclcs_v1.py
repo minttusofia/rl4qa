@@ -20,13 +20,15 @@ def summary(configuration):
 
 
 def to_cmd(c, _path=None):
-    command = 'sh ../python3.c -m rl.main --dirname 03_22/cl2 --lr {} --gamma {} --update_freq {} ' \
-              '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
+    command = 'sh ../python3.c -m rl.main --dirname 03_26/cl1 --lr {} --gamma {} --update_freq {} ' \
+              '{} --default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
               '--qtype all --actions all-30 --verbose 1 ' \
-              '--run_id 1 --num_items_train 50000 --num_items_eval 500 --redis_host cannon.cs.ucl.ac.uk' \
+              '--run_id 1 --num_items_train 300000 --num_items_eval 500 --redis_host ' \
+              'cannon.cs.ucl.ac.uk' \
               ''.format(c['lr'],
                         c['gamma'],
                         c['update_freq'],
+                        c['baseline'],
                         c['default_r'],
                         c['found_candidate_r'],
                         c['penalty'],
@@ -74,9 +76,16 @@ def main(argv):
         gamma=[0.8, 0.9]
     )
 
+    hyperparameters_space_3 = dict(
+        baseline=['--baseline=mean', ''],
+        gamma=[0.8, 0.9, 0.95, 0.99],
+        lr=[1e-4, 1e-3, 1e-4],
+        update_freq=[10, 20]
+    )
+
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(hyperparameters_space_2)
+    current_experiment.update(hyperparameters_space_3)
     configurations = list(cartesian_product(current_experiment))
 
     path = './logs/v1/uclcs_v1/'
