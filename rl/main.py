@@ -316,7 +316,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         top_idx = search_engine.rank_docs(question.id, query0, topk=len(question.supports))[-1]
         d0 = question.supports[top_idx]
 
-        verbose_print(2, args.verbose, '   ', query0, '\t->', top_idx)
+        verbose_print(2, args.verbose, '   ( 0)', form_query(actions[0], subj0, 'red'), '  ->',
+                      top_idx)
         # Send query to RC module
         if redis_server is None:
             rc_answers = get_rc_answers(reader, query0, d0)
@@ -354,7 +355,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
-            verbose_print(2, args.verbose, '   ', query_t, '\t->', top_idx)
+            verbose_print(2, args.verbose, '   ({:2})'.format(a_t),
+                          form_query(actions[a_t], subj_t, 'red'), '  ->', top_idx)
             # Send query to RC module
             if redis_server is None:
                 rc_answers = get_rc_answers(reader, query_t, d_t)
@@ -394,6 +396,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 # TODO: collect aggregate action history data
                 verbose_print(1, args.verbose, '\tAction history:', ep_history[:, 1])
                 break
+            elif r == args.penalty:
+                verbose_print(2, args.verbose, '( Correct answer', question.answer, ')')
 
         if train:
             # TODO: baseline when non-terminal rewards != 0
