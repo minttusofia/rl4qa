@@ -417,18 +417,18 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             scalars = scalar_summaries(ep_reward, ep_length, corrects, e, dev=dev)
             if e % len(dataset) == 0:  # Add action preferences for 1st item in dataset
                 summary_objects = sess.run(
-                    [tf.summary.histogram('action_preferences_1st_question_item', agent.output,
-                                          collections=range(len(actions))),
-                     tf.summary.tensor_summary('action_preferences_1st_question_item',
-                                               agent.output),
-                     tf.summary.histogram('action_history_1st_question_item',
-                                          ep_history[:, 1],
-                                          collections=range(max_queries))]
-                    + [tf.summary.histogram('hidden_{}'.format(l), agent.hidden[l])
+                    # [tf.summary.histogram('action_preferences_1st_question_item', agent.output,
+                    #                       collections=range(len(actions))),
+                    #  tf.summary.tensor_summary('action_preferences_1st_question_item',
+                    #                            agent.output),
+                    #  tf.summary.histogram('action_history_1st_question_item',
+                    #                       ep_history[:, 1],
+                    #                       collections=range(max_queries))] +
+                    [tf.summary.histogram('hidden_{}'.format(l), agent.hidden[l])
                        for l in range(len(h_sizes))],
                     feed_dict={agent.state_in: [s0]})
 
-                scalars['episode_reward (1st question item)'] = ep_reward
+                #scalars['episode_reward (1st question item)'] = ep_reward
 
             write_summary(summary_writer, e, scalars, summary_objects)
         reward_history.append(ep_reward)
