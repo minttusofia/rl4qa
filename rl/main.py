@@ -259,6 +259,10 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if train:
         # Only used when baseline is not None
         baseline_r = tf.Variable(0., trainable=False)
+        new_reward = tf.placeholder(tf.float32, [])
+        current_e = tf.placeholder(tf.float32, [])
+        update_baseline = tf.assign(baseline_r,
+                                    (new_reward + (current_e - 1) * baseline_r)/current_e)
 
     num_state_parts = 5
     # TODO: allow sets of types
@@ -287,7 +291,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         summary_writer = (tf.summary.FileWriter(summaries_path, sess.graph)
                           if summary_writer is None else summary_writer)
         if not args.random_agent:  # no variables to save/retrieve for random agent
-            # saver = tf.train.Saver()
             if agent_from_checkpoint is not None:
                 print('Loading saved agent from', agent_from_checkpoint)
                 saver.restore(sess, agent_from_checkpoint)
@@ -403,7 +406,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             # TODO: baseline when non-terminal rewards != 0
             if args.baseline == 'mean':
                 ep_history[-1, 2] -= sess.run(baseline_r)
-                baseline_r = ep_history[-1, 2] * 1./(e+1.) + baseline_r * e/(e+1.)
+                sess.run(update_baseline, {current_e: e + 1., new_reward: ep_history[-1, 2]})
             ep_history[:, 2] = discount_rewards(ep_history[:, 2], gamma)
             feed_dict = {agent.reward_holder: ep_history[:, 2],
                          agent.action_holder: ep_history[:, 1],
@@ -512,7 +515,7 @@ def parse_args():
     parser.add_argument('--num_items_train', default=None, type=int,
                         help='If set, the number of instances to train on. If > subset_size, '
                              'iterate over data more than once.')
-    parser.add_argument('--num_items_eval', default=None, type=int,
+    parser.add_argument('--num_items_eval', default=500, type=int,
                         help='If set, the number of dev instances to evaluate at intermediate '
                              'checkpoints. Capped at dev size.')
     parser.add_argument('--num_items_final_eval', default=None, type=int,
