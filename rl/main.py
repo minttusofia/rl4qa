@@ -314,45 +314,26 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(question.id, 'has no question subject')
             continue
         # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
-        query0 = form_query(actions[0], subj0)
-        # First query won't have been asked from top doc
-        top_idx = search_engine.rank_docs(question.id, query0, topk=len(question.supports))[-1]
-        d0 = question.supports[top_idx]
-
-        verbose_print(2, args.verbose, '   ( 0)', form_query(actions[0], subj0, 'red'), '  ->',
-                      top_idx)
-        # Send query to RC module
-        if redis_server is None:
-            rc_answers = get_rc_answers(reader, query0, d0)
-        else:
-            rc_answers, _ = get_cached_rc_answers(reader, query0, d0, redis_server)
-        ans0 = rc_answers[0]
-        # Initial state: pick action 0 automatically
-        s0 = [subj0, ' '.join(actions[0]), subj0, d0, ans0.text]
+        s0 = [subj0, None, subj0, None, None]
         if types_in_state:
             s0.append(q_type.replace('_', ' '))
-        embedded_state = embs.embed_state(s0)
-        s0 = embedded_state  # np.hstack(embedded_state)
+        s0 = embs.embed_state(s0)
+
         s_prev = s0
-        # Should first answer be checked?
-        '''
-        (r, correct_answers, incorrect_answers, incorrect_answers_this_episode,
-         seen_incorrect_answer_this_episode) = (
-             check_answer(ans0, question, correct_answers, incorrect_answers,
-                          incorrect_answers_this_episode, seen_incorrect_answer_this_episode,
-                          e))
-        '''
-        ep_reward = 0
         subj_t = subj0
+        ep_reward = 0
 
         # Store past queries asked -> documents retrieved mappings
         queries_asked = defaultdict(list)
         for t in range(max_queries):
             top_idx = None
             while top_idx is None:
-                # Pick action according to policy
-                a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
-                a_t = np.random.choice(range(len(actions)), p=a_distr[0])
+                if t == 0 and args.first_action is not None:
+                    a_t = args.first_action
+                else:
+                    # Pick action according to policy
+                    a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
+                    a_t = np.random.choice(range(len(actions)), p=a_distr[0])
                 top_idx, subj_t, query_t = get_document_for_query(
                     actions[a_t], subj_t, search_engine, question, nouns, queries_asked)
             queries_asked[query_t].append(top_idx)
@@ -375,7 +356,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
             if types_in_state:
                 s_t.append(q_type.replace('_', ' '))
-            s_t = embs.embed_state(s_t) # np.hstack(embs.embed_state(s_t))
+            s_t = embs.embed_state(s_t)
 
             history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
             if t == 0:
@@ -535,11 +516,13 @@ def parse_args():
     parser.add_argument('--conf_threshold', default=0.10, type=float,
                         help='Confidence threshold required to use ')
 
-    parser.add_argument('--qtype', type=str,
-                        default='located_in_the_administrative_territorial_entity',
+    parser.add_argument('--qtype', type=str, default='all',
                         help='WikiHop question type to include. Defines action space of agent.')
-    parser.add_argument('--actions', type=str, default=None,
+    parser.add_argument('--actions', type=str, default='all-30',
                         help='ID of action space to use. If not set, use default for query type.')
+    parser.add_argument('--first_action', type=int, default=None,
+                        help='If set, start episode by taking action at this index, else use '
+                             'policy to select first action.')
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')
@@ -632,13 +615,11 @@ def initialise(args, dev=False):
     if args.num_items_train is not None and not dev:
         num_items = args.num_items_train
     elif dev:
-        if args.num_items_eval is not None:
-            max_items_eval = (max(args.num_items_eval, args.num_items_final_eval)
-                              if args.num_items_final_eval is not None
-                              else args.num_items_eval)
-            num_items = min(len(dataset), max_items_eval)
-        elif args.num_items_final_eval is not None:
-            num_items = min(len(dataset), args.num_items_final_eval)
+        if args.num_items_eval is None:
+            args.num_items_eval = len(dataset)
+        if args.num_items_final_eval is None:
+            args.num_items_final_eval = len(dataset)
+        num_items = max(args.num_items_eval, args.num_items_final_eval)
 
     # TODO: allow sets of types
     one_type_only = args.qtype != 'all'

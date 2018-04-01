@@ -136,6 +136,8 @@ class GloveLookup:
         return self.oov
 
     def lookup_doc_tf_idf(self, doc, tf):
+        if doc is None:
+            return np.zeros(self.emb_dim)
         words = doc.split()
         return np.mean([tf[w.lower()] * self.lookup_word_idf(w) for w in words], axis=0)
 
@@ -147,8 +149,9 @@ class GloveLookup:
         tfs = []
         for elem in s:
             tfs.append(defaultdict(int))
-            for word in elem.split():
-                tfs[-1][word.lower()] += 1
+            if elem is not None:
+                for word in elem.split():
+                    tfs[-1][word.lower()] += 1
         emb_elements = [self.lookup_doc_tf_idf(s[e], tfs[e]) for e in range(len(s))]
         if np.any([type(component) == np.float64 or len(component) != self.emb_dim
                    for component in emb_elements]):
