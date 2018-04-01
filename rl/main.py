@@ -91,7 +91,7 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
     reward = default_r
     if answer.text.lower() in question.candidates_lower:
         if answer.text.lower() == question.answer.lower():
-            verbose_print(1, verbosity_level, e, ': Found correct answer', answer.text)
+            verbose_print(1, verbosity_level, '   Found correct answer', answer.text)
             corrects.append(e)
             reward = success_r
         # If the current answer is not correct and we have not submitted it before
@@ -99,7 +99,7 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
             reward = found_candidate_r
             if is_last_action:
                 reward = penalty
-            verbose_print(1, verbosity_level, e, ': Found incorrect answer candidate', answer.text)
+            verbose_print(1, verbosity_level, '   Found incorrect answer candidate', answer.text)
             incorrect_answers_this_episode.append(answer.text.lower())
             if e not in incorrects:
                 incorrects.append(e)
@@ -306,9 +306,17 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         for ix, grad in enumerate(gradBuffer):
             gradBuffer[ix] = grad * 0
 
+    run_type = 'train'
+    if dev:
+        if outer_e is not None:
+            run_type = 'eval'
+        else:
+            run_type = 'final eval'
     for e in range(num_episodes):
         question = Question(dataset[e % len(dataset)])
-        verbose_print(2, args.verbose, e, ':', question.query)
+        verbose_print(2, args.verbose,
+                      '{} : {}     {} - {} ({})'.format(e, question.query, question.id, run_type,
+                                                        num_episodes))
         q_type, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
         if subj0 == '':  # WH_dev_1559 and WH_dev_5113 have no question subject
             print(question.id, 'has no question subject')
@@ -514,7 +522,8 @@ def parse_args():
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
     parser.add_argument('--conf_threshold', default=0.10, type=float,
-                        help='Confidence threshold required to use ')
+                        help='Confidence threshold required to use reading comprehension answer '
+                             'in following query.')
 
     parser.add_argument('--qtype', type=str, default='all',
                         help='WikiHop question type to include. Defines action space of agent.')
