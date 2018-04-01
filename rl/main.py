@@ -157,7 +157,7 @@ def write_eval_file(eval_path, corrects, incorrects, num_episodes):
                                                 float(len(incorrects))/num_episodes))
 
 
-def print_model_weights(sess, args):
+def verbose_print_model_weights(sess, args):
     if args.verbose_weights and not args.random_agent:
         all_vars = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES)
         for var in all_vars:
@@ -217,6 +217,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         action_space_id = args.qtype
     actions = action_space_for_id(action_space_id)
     train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
+    final_eval = dev and not total_accuracy_only
 
     # Threshold above which to trust the reading comprehension module's answers
     confidence_threshold = args.conf_threshold
@@ -308,7 +309,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
     run_type = 'train'
     if dev:
-        if outer_e is not None:
+        if total_accuracy_only:
             run_type = 'eval'
         else:
             run_type = 'final eval'
@@ -467,14 +468,18 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     # Calculate total dev accuracy
     if args.run_id is not None and total_accuracy_only:
         write_summary(summary_writer, outer_e,
-                      {'total_dev_accuracy':
+                      {'interm_dev_accuracy ({})'.format(e + 1):
+                           accuracy_from_history(corrects, e, horizon=None)})
+    if args.run_id is not None and final_eval:
+        write_summary(summary_writer, e,
+                      {'final_dev_accuracy ({})'.format(e + 1):
                            accuracy_from_history(corrects, e, horizon=None)})
 
     # Save final model
     if train and args.run_id is not None:
         saver.save(sess, checkpoint_path + 'final.ckpt')
         print('Saving final model to', checkpoint_path + 'final.ckpt')
-        print_model_weights(sess, args)
+        verbose_print_model_weights(sess, args)
 
     if existing_session is None:
         sess.close()
@@ -701,4 +706,3 @@ if __name__ == "__main__":
         # Run final evaluation
         run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
                   redis_server, embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
-
