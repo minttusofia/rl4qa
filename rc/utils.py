@@ -18,20 +18,20 @@ def get_rc_answers(reader, queries, documents):
     return answers
 
 
-def get_cached_rc_answers(reader, queries, documents, redis_server, doc_idxs=None):
+def get_cached_rc_answers(reader, queries, documents, redis_server, q_ids=None, doc_idxs=None):
     t = time.time()
     used_cache = False
     if type(queries) != list:
-        if doc_idxs is not None:
-            answer = redis_server.get(pickle.dumps((queries, doc_idxs)))
+        if q_ids is not None:
+            answer = redis_server.get(pickle.dumps((queries, q_ids, doc_idxs)))
         else:  # use full document as index
             answer = redis_server.get(pickle.dumps((queries, documents)))
         if answer is None or type(pickle.loads(answer)) is not tuple:
             answer = get_rc_answers(reader, queries, documents)
             if type(answer[0]) == list:
                 answer = answer[0]
-            if doc_idxs is not None:
-                redis_server.set(pickle.dumps((queries, doc_idxs)),
+            if q_ids is not None:
+                redis_server.set(pickle.dumps((queries, q_ids, doc_idxs)),
                                  pickle.dumps((answer[0].text, answer[0].score)))
             else:
                 redis_server.set(pickle.dumps((queries, documents)),
@@ -50,8 +50,8 @@ def get_cached_rc_answers(reader, queries, documents, redis_server, doc_idxs=Non
     unanswered_documents = doc_idxs
     answers = [None for _ in range(len(queries))]
     for q in range(len(queries)):
-        if doc_idxs is not None:
-            answer = redis_server.get(pickle.dumps((queries[q], doc_idxs[q])))
+        if q_ids is not None:
+            answer = redis_server.get(pickle.dumps((queries[q], q_ids[q], doc_idxs[q])))
         else:  # use full document as index
             answer = redis_server.get(pickle.dumps((queries[q], documents[q])))
         if answer is not None:
