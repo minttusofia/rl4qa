@@ -9,7 +9,6 @@ import tensorflow as tf
 from bisect import bisect
 from collections import defaultdict
 from jack import readers
-from random import randint
 
 from ir.search_engine import SearchEngine
 from playground.datareader import format_paths
@@ -19,7 +18,8 @@ from rl.actions import action_space_for_id
 from rc.utils import get_rc_answers, get_cached_rc_answers
 from rl.agent import Agent, RandomAgent, Reinforce
 from rl.embeddings import GloveLookup
-from shared.utils import trim_index, form_query, get_document_for_query
+from shared.utils import check_answer_confidence, get_document_for_query, form_query, trim_index
+from shared.utils import verbose_print
 
 
 def format_run_id(args):
@@ -50,7 +50,8 @@ def format_run_id(args):
     return run_id
 
 
-def format_experiment_paths(query_type, actions, run_id, dirname, dev=False, save_checkpoints=True):
+def format_experiment_paths(query_type, actions, backtracking, run_id, dirname, dev=False,
+                            save_checkpoints=True):
     checkpoint_path = None
     if dirname is not None:
         dirname += '/'
@@ -59,8 +60,10 @@ def format_experiment_paths(query_type, actions, run_id, dirname, dev=False, sav
 
     if actions is not None:
         actions = '/' + actions
+        if backtracking:
+            actions += '_bt'
     else:
-        actions = ''
+        actions = 'bt' if backtracking else ''
 
     if save_checkpoints:
         checkpoint_path = 'rl/checkpoints/{}{}{}/{}/model-'.format(dirname, query_type,
@@ -164,13 +167,6 @@ def verbose_print_model_weights(sess, args):
             print(var, '\n', sess.run(var))
 
 
-def verbose_print(verbosity, verbose_level, *args):
-    if verbose_level >= verbosity:
-        for arg in args:
-            print(arg, end=' ')
-        print()
-
-
 def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, agent=None, dev=False, eval_dataset=None,
               eval_search_engine=None, eval_nouns=None, existing_session=None,
@@ -216,11 +212,12 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if args.actions is None:
         action_space_id = args.qtype
     actions = action_space_for_id(action_space_id)
+    if args.backtrack:
+        actions.append('BACKTRACK')
+
     train = agent_from_checkpoint is None and not args.random_agent and not total_accuracy_only
     final_eval = dev and not total_accuracy_only
 
-    # Threshold above which to trust the reading comprehension module's answers
-    confidence_threshold = args.conf_threshold
     max_queries = args.max_queries
 
     if dev or args.num_items_train is None:
@@ -247,7 +244,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if args.run_id is not None:
         run_id = format_run_id(args)
         summaries_path, checkpoint_path, eval_path = format_experiment_paths(
-            args.qtype, args.actions, run_id, args.dirname, dev, save_checkpoints=train)
+            args.qtype, args.actions, args.backtrack, run_id, args.dirname, dev,
+            save_checkpoints=train)
         for path in [summaries_path, checkpoint_path]:
             if path is not None and not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
@@ -273,7 +271,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
     #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim, TODO
     s_size = num_state_parts * emb_dim
-    # TODO: add backtracking action
     a_size = len(actions)
 
     if agent is None:
@@ -297,7 +294,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 saver.restore(sess, agent_from_checkpoint)
             else:
                 print('Initialised agent weights')
-    print_model_weights(sess, args)
+    verbose_print_model_weights(sess, args)
 
     reward_history = []
     ep_length_history = []
@@ -322,34 +319,62 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         if subj0 == '':  # WH_dev_1559 and WH_dev_5113 have no question subject
             print(question.id, 'has no question subject')
             continue
-        # First action taken with partial information: no a_t-1, subj_t-1, d_t-1, ans_t-1
-        s0 = [subj0, None, subj0, None, None]
+        # First action taken with partial information: no a_t-1, subj_t-1, d_t-1
+        s0 = [subj0, None, None, None, subj0]
         if types_in_state:
             s0.append(q_type.replace('_', ' '))
         s0 = embs.embed_state(s0)
+        state_history = [s0]  # used for backtracking
+        subj_history = [subj0]
 
         s_prev = s0
-        subj_t = subj0
+        subj_prev = subj0
         ep_reward = 0
+        d_t = None
 
         # Store past queries asked -> documents retrieved mappings
         queries_asked = defaultdict(list)
         for t in range(max_queries):
             top_idx = None
+            query_t = None
             while top_idx is None:
                 if t == 0 and args.first_action is not None:
                     a_t = args.first_action
                 else:
                     # Pick action according to policy
                     a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
-                    a_t = np.random.choice(range(len(actions)), p=a_distr[0])
-                top_idx, subj_t, query_t = get_document_for_query(
-                    actions[a_t], subj_t, search_engine, question, nouns, queries_asked)
+                    if len(state_history) > 1 or not args.backtrack:
+                        a_t = np.random.choice(range(len(actions)), p=a_distr[0])
+                    else:
+                        # Remove backtrack action and renormalise
+                        a_distr = [a_distr[0][:-1]/np.sum(a_distr[0][:-1])]
+                        a_t = np.random.choice(range(len(actions) - 1), p=a_distr[0])
+
+                    while args.backtrack and a_t == len(actions) - 1:
+                        # backtrack
+                        subj_history.pop(), state_history.pop()
+                        # Should state that we backtrack to be aware of the question that was asked?
+                        s_prev = state_history[-1]
+                        subj_prev = subj_history[-1]
+                        verbose_print(2, args.verbose, '  Backtracking to subject', subj_prev)
+                        a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
+                        if len(state_history) > 1:
+                            a_t = np.random.choice(range(len(actions)), p=a_distr[0])
+                        else:
+                            # Remove backtrack and renormalise
+                            a_distr = [a_distr[0][:-1]/np.sum(a_distr[0][:-1])]
+                            a_t = np.random.choice(range(len(actions) - 1), p=a_distr[0])
+
+                top_idx, subj_prev, query_t = get_document_for_query(
+                    actions[a_t], subj_prev, search_engine, question, nouns, queries_asked,
+                    args.verbose)
+                if top_idx is None:  # subject has been reset
+                    s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev])
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
             verbose_print(2, args.verbose, '   ({:2})'.format(a_t),
-                          form_query(actions[a_t], subj_t, 'red'), '  ->', top_idx)
+                          form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
             # Send query to RC module
             if redis_server is None:
                 rc_answers = get_rc_answers(reader, query_t, d_t)
@@ -357,16 +382,23 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server,
                                                       question.id, top_idx)
             ans_t = rc_answers[0]
+            subj_t = check_answer_confidence(ans_t, args.conf_threshold, nouns, question, top_idx,
+                                             args.verbose)
 
+            # Option: don't check answers with confidence < threshold
             (r, incorrect_answers_this_episode, corrects, incorrects) = (
                 check_answer(ans_t, question, incorrect_answers_this_episode, e, corrects,
                              incorrects, t == max_queries - 1, args.default_r,
                              args.found_candidate_r, args.penalty, args.success_r, args.verbose))
-            # TODO: alternative: form_query(actions[a_t], subj_t)
-            s_t = [subj0, ' '.join(actions[a_t]), subj_t, d_t, ans_t.text]
+
+            # alternative: form_query(actions[a_t], subj_t)
+            s_t = [subj0, ' '.join(actions[a_t]), subj_prev, d_t, subj_t]
             if types_in_state:
                 s_t.append(q_type.replace('_', ' '))
             s_t = embs.embed_state(s_t)
+            state_history.append(s_t)
+            subj_history.append(subj_t)
+            subj_prev = subj_t
 
             history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
             if t == 0:
@@ -374,14 +406,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             else:
                 ep_history = np.append(ep_history, history_frame, axis=0)
             s_prev = s_t
-            if ans_t.score > confidence_threshold:
-                subj_t = ans_t.text.lower()
-            else:
-                # Pick a noun phrase at random from top document
-                rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
-                subj_t = nouns[question.id][top_idx][rand_draw].lower()
-                verbose_print(2, args.verbose, 'Conf', ans_t.score, '<', confidence_threshold,
-                              ': picked', subj_t, '(', rand_draw, ') at random')
+
             ep_reward += r
             if r != args.default_r:
                 verbose_print(2, args.verbose, 'Received reward', r)
@@ -538,6 +563,8 @@ def parse_args():
     parser.add_argument('--first_action', type=int, default=None,
                         help='If set, start episode by taking action at this index, else use '
                              'policy to select first action.')
+    parser.add_argument('--backtrack', nargs='?', type=bool, default=False, const=True,
+                        help='If True, add the action of undoing the previous query.')
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')
@@ -693,7 +720,8 @@ if __name__ == "__main__":
                   eval_nouns=eval_nouns)
 
     run_id = format_run_id(args)
-    _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, run_id, args.dirname)
+    _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, args.backtrack,
+                                                    run_id, args.dirname)
     if args.model_from_checkpoint:
         # Replace default formatted run_id with custom argument
         checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],

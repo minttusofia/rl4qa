@@ -3,6 +3,15 @@ import random
 import time
 
 from colors import color
+from random import randint
+
+
+def verbose_print(verbosity, verbose_level, *args):
+    """Print *args if current verbosity level surpasses required verbosity of print statement."""
+    if verbose_level >= verbosity:
+        for arg in args:
+            print(arg, end=' ')
+        print()
 
 
 def trim_index(dataset, nouns, search_engine, keep_most=False):
@@ -62,7 +71,8 @@ def form_query(template, subject, fg_color=None):
     return query
 
 
-def get_document_for_query(action, subj, search_engine, question, nouns, queries_asked):
+def get_document_for_query(action, subj, search_engine, question, nouns, queries_asked,
+                           verbose_level=0):
     query = form_query(action, subj)
     top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
     # Iterate over ranking backwards (last document is best match)
@@ -76,4 +86,19 @@ def get_document_for_query(action, subj, search_engine, question, nouns, queries
     subj_t = (nouns[question.id]
               [top_idx]
               [random.randint(0, len(nouns[question.id][top_idx])-1)])
+    verbose_print(2, verbose_level,
+                  '  Question has been asked from all docs, continuing at', subj_t)
     return None, subj_t, None
+
+
+def check_answer_confidence(answer, confidence_threshold, nouns, question_id, top_idx,
+                            verbose_level=0):
+    if answer.score > confidence_threshold:
+        return answer.text.lower()
+    else:
+        # Pick a noun phrase at random from top document
+        rand_draw = randint(0, len(nouns[question_id][top_idx])-1)
+        subject = nouns[question_id][top_idx][rand_draw].lower()
+        verbose_print(2, verbose_level, '  Conf', answer.score, '<', confidence_threshold,
+                      ': picked', subject, '(', rand_draw, ') at random')
+        return subject
