@@ -161,7 +161,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                 rc_answers = get_rc_answers(reader, query, question.supports[top_idx])
             else:
                 rc_answers, _ = get_cached_rc_answers(reader, query, question.supports[top_idx],
-                                                      redis_server)
+                                                      redis_server, top_idx)
             answer = rc_answers[0]
             score = answer.score
             if penalize_long_answers:
@@ -279,7 +279,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
                 rc_answers = get_rc_answers(reader, batch_queries, batch_supports)
             else:
                 rc_answers, _ = get_cached_rc_answers(reader, batch_queries, batch_supports,
-                                                      redis_server)
+                                                      redis_server, top_idxs)
 
             for item in range(num_items_in_batch):  # generate next query
                 # TODO: remove found_candidate to match eval_single_templates

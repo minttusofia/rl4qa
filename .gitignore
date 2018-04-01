@@ -12,7 +12,8 @@ allennlp/squad
 allennlp/glove
 
 # Redis
-fastqa.aof
+rc/redis/**/*.aof
+rc/redis/**/*.rdb
 
 # TensorFlow
 rl/**/checkpoints

@@ -353,7 +353,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             if redis_server is None:
                 rc_answers = get_rc_answers(reader, query_t, d_t)
             else:
-                rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server)
+                rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server, top_idx)
             ans_t = rc_answers[0]
 
             (r, incorrect_answers_this_episode, corrects, incorrects) = (

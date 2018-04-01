@@ -18,17 +18,25 @@ def get_rc_answers(reader, queries, documents):
     return answers
 
 
-def get_cached_rc_answers(reader, queries, documents, redis_server):
+def get_cached_rc_answers(reader, queries, documents, redis_server, doc_idxs=None):
     t = time.time()
     used_cache = False
     if type(queries) != list:
-        answer = redis_server.get(pickle.dumps((queries, documents)))
+        if doc_idxs is not None:
+            answer = redis_server.get(pickle.dumps((queries, doc_idxs)))
+        else:  # use full document as index
+            answer = redis_server.get(pickle.dumps((queries, documents)))
         if answer is None or type(pickle.loads(answer)) is not tuple:
             answer = get_rc_answers(reader, queries, documents)
             if type(answer[0]) == list:
                 answer = answer[0]
-            redis_server.set(pickle.dumps((queries, documents)),
-                             pickle.dumps((answer[0].text, answer[0].score)))
+            if doc_idxs is not None:
+                redis_server.set(pickle.dumps((queries, doc_idxs)),
+                                 pickle.dumps((answer[0].text, answer[0].score)))
+            else:
+                redis_server.set(pickle.dumps((queries, documents)),
+                                 pickle.dumps((answer[0].text, answer[0].score)))
+
         else:
             answer = pickle.loads(answer)
             if type(answer[0]) == list:
@@ -39,10 +47,13 @@ def get_cached_rc_answers(reader, queries, documents, redis_server):
         return list(answer), used_cache
 
     unanswered_queries = queries
-    unanswered_documents = documents
+    unanswered_documents = doc_idxs
     answers = [None for _ in range(len(queries))]
     for q in range(len(queries)):
-        answer = redis_server.get(pickle.dumps((queries[q], documents[q])))
+        if doc_idxs is not None:
+            answer = redis_server.get(pickle.dumps((queries[q], doc_idxs[q])))
+        else:  # use full document as index
+            answer = redis_server.get(pickle.dumps((queries[q], documents[q])))
         if answer is not None:
             print('answer found in cache')
             answers[q] = answer
