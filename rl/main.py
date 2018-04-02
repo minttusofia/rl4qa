@@ -39,6 +39,7 @@ def format_run_id(args):
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
         run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
+                  + '-ew{}-init{}'.format(args.entropy_w, args.num_init_random_steps)
                   + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
@@ -227,14 +228,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         # Repeat if num_episodes > len(dataset)
         num_episodes = args.num_items_train
 
-    # Only used when train=True
-    gamma = args.gamma
-    lr = args.lr
-    update_frequency = args.update_freq
-
-    # Only used when random_agent=False
-    h_sizes = args.h_sizes
-
     # Only used when eval_dataset is not None, must be > checkpoint_freq
     eval_freq = 4000
 
@@ -275,9 +268,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
     if agent is None:
         if args.random_agent:
-            agent = RandomAgent(state_shape=s_size, action_shape=a_size)
+            agent = RandomAgent(s_size, a_size)
         else:
-            agent = Reinforce(lr=lr, state_shape=s_size, action_shape=a_size, hidden_sizes=h_sizes)
+            agent = Reinforce(args.lr, s_size, a_size, args.h_sizes, args.entropy_w)
     if not args.random_agent:
         saver = tf.train.Saver()
 
@@ -298,6 +291,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
     reward_history = []
     ep_length_history = []
+    num_actions_taken = 0
 
     if train:
         gradBuffer = sess.run(tf.trainable_variables())
@@ -330,7 +324,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         s_prev = s0
         subj_prev = subj0
         ep_reward = 0
-        d_t = None
 
         # Store past queries asked -> documents retrieved mappings
         queries_asked = defaultdict(list)
@@ -338,7 +331,23 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             top_idx = None
             query_t = None
             while top_idx is None:
-                if t == 0 and args.first_action is not None:
+                random_init = train and num_actions_taken < args.num_init_random_steps
+                if random_init:
+                    a_t = np.random.randint(len(actions))
+                    if len(state_history) <= 1 and args.backtrack:  # Remove backtrack
+                        a_t = np.random.randint(len(actions) - 1)
+                    while args.backtrack and a_t == len(actions) - 1:  # backtrack
+                        subj_history.pop(), state_history.pop()
+                        # Should state that we backtrack to be aware of the question that was asked?
+                        s_prev = state_history[-1]
+                        subj_prev = subj_history[-1]
+                        verbose_print(2, args.verbose, '  Backtracking to subject', subj_prev)
+                        if len(state_history) > 1:
+                            a_t = np.random.randint(len(actions))
+                        else:  # Remove backtrack
+                            a_t = np.random.randint(len(actions) - 1)
+
+                elif t == 0 and args.first_action is not None:
                     a_t = args.first_action
                 else:
                     # Pick action according to policy
@@ -350,8 +359,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                         a_distr = [a_distr[0][:-1]/np.sum(a_distr[0][:-1])]
                         a_t = np.random.choice(range(len(actions) - 1), p=a_distr[0])
 
-                    while args.backtrack and a_t == len(actions) - 1:
-                        # backtrack
+                    while args.backtrack and a_t == len(actions) - 1:  # backtrack
                         subj_history.pop(), state_history.pop()
                         # Should state that we backtrack to be aware of the question that was asked?
                         s_prev = state_history[-1]
@@ -360,8 +368,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                         a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
                         if len(state_history) > 1:
                             a_t = np.random.choice(range(len(actions)), p=a_distr[0])
-                        else:
-                            # Remove backtrack and renormalise
+                        else:  # Remove backtrack and renormalise
                             a_distr = [a_distr[0][:-1]/np.sum(a_distr[0][:-1])]
                             a_t = np.random.choice(range(len(actions) - 1), p=a_distr[0])
 
@@ -373,8 +380,12 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
-            verbose_print(2, args.verbose, '   ({:2})'.format(a_t),
-                          form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
+            if random_init:  # action was selected at random
+                verbose_print(2, args.verbose, '   init ({:2})'.format(a_t),
+                              form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
+            else:
+                verbose_print(2, args.verbose, '   ({:2})'.format(a_t),
+                              form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
             # Send query to RC module
             if redis_server is None:
                 rc_answers = get_rc_answers(reader, query_t, d_t)
@@ -399,6 +410,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             state_history.append(s_t)
             subj_history.append(subj_t)
             subj_prev = subj_t
+            num_actions_taken += 1
 
             history_frame = np.expand_dims([s_prev, a_t, r, s_t], axis=0)
             if t == 0:
@@ -421,27 +433,38 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         if train:
             # TODO: baseline when non-terminal rewards != 0
             if args.baseline == 'mean':
-                ep_history[-1, 2] -= sess.run(baseline_r)
+                raw_reward = ep_history[-1, 2]
+                baseline_reward = sess.run(baseline_r)
+                ep_history[-1, 2] -= baseline_reward
                 sess.run(update_baseline, {current_e: e + 1., new_reward: ep_history[-1, 2]})
-            ep_history[:, 2] = discount_rewards(ep_history[:, 2], gamma)
+            ep_history[:, 2] = discount_rewards(ep_history[:, 2], args.gamma)
             feed_dict = {agent.reward_holder: ep_history[:, 2],
                          agent.action_holder: ep_history[:, 1],
                          agent.state_in: np.vstack(ep_history[:, 0])}
-            grads = sess.run(agent.gradients, feed_dict=feed_dict)
+            grads, pg_loss, ent_loss = sess.run([agent.gradients, agent.pg_loss, agent.ent_loss],
+                                                feed_dict)
+            verbose_print(2, args.verbose,
+                          'PG Loss {}; Ent Loss {}; total {}'.format(pg_loss, ent_loss,
+                                                                     pg_loss + ent_loss))
+            if args.baseline is not None:
+                verbose_print(2, args.verbose,
+                              'Raw {}; B {}; effective {}'.format(raw_reward, baseline_reward,
+                                                                  raw_reward - baseline_reward))
             for idx, grad in enumerate(grads):
                 gradBuffer[idx] += grad
 
-            if e % update_frequency == 0 and e != 0:
+            if e % args.update_freq == 0 and e != 0:
                 verbose_print(2, args.verbose, e, 'Updating policy')
                 feed_dict = dict(zip(agent.gradient_holders, gradBuffer))
-                _ = sess.run(agent.update_batch, feed_dict=feed_dict)
+                _ = sess.run(agent.update_batch, feed_dict)
                 for ix, grad in enumerate(gradBuffer):
                     gradBuffer[ix] = grad * 0
 
-        if args.run_id is not None and not total_accuracy_only and not args.random_agent:
+        if (args.run_id is not None and not total_accuracy_only and not args.random_agent
+                and not random_init):
             summary_objects = None
             scalars = scalar_summaries(ep_reward, ep_length, corrects, e, dev=dev)
-            if e % len(dataset) == 0:  # Add action preferences for 1st item in dataset
+            if train and e % len(dataset) == 0:  # Add action preferences for 1st item in dataset
                 summary_objects = sess.run(
                     # [tf.summary.histogram('action_preferences_1st_question_item', agent.output,
                     #                       collections=range(len(actions))),
@@ -451,7 +474,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                     #                       ep_history[:, 1],
                     #                       collections=range(max_queries))] +
                     [tf.summary.histogram('hidden_{}'.format(l), agent.hidden[l])
-                       for l in range(len(h_sizes))],
+                     for l in range(len(args.h_sizes))],
                     feed_dict={agent.state_in: [s0]})
 
                 #scalars['episode_reward (1st question item)'] = ep_reward
@@ -565,6 +588,11 @@ def parse_args():
                              'policy to select first action.')
     parser.add_argument('--backtrack', nargs='?', type=bool, default=False, const=True,
                         help='If True, add the action of undoing the previous query.')
+    parser.add_argument('--entropy_w', default=0.001, type=float,
+                        help='Policy entropy regularisation weight.')
+    parser.add_argument('--num_init_random_steps', default=0, type=int,
+                        help='Number of actions to take uniformly at random before using learned '
+                             'policy.')
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')

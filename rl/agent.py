@@ -17,7 +17,7 @@ class RandomAgent(Agent):
 
 class Reinforce(Agent):
     """Based on https://github.com/awjuliani/DeepRL-Agents/blob/master/Vanilla-Policy.ipynb."""
-    def __init__(self, lr, state_shape, action_shape, hidden_sizes):
+    def __init__(self, lr, state_shape, action_shape, hidden_sizes, entropy_w=0.):
         super(Reinforce, self).__init__(state_shape)
         # Policy network
         hidden = self.state_in
@@ -27,20 +27,29 @@ class Reinforce(Agent):
                                                      biases_initializer=None,
                                                      activation_fn=tf.nn.relu)
             self.hidden.append(hidden)
-        self.output = tf.contrib.slim.fully_connected(hidden, action_shape,
-                                                      activation_fn=tf.nn.softmax,
-                                                      biases_initializer=None)
+        self.softmax_output = tf.contrib.slim.fully_connected(hidden, action_shape,
+                                                              activation_fn=tf.nn.softmax,
+                                                              biases_initializer=None)
+        # To avoid arithmetic overflow
+        output = self.softmax_output + 1e-15
+        self.output = output/tf.reduce_sum(output)
         self.chosen_action = tf.argmax(self.output, 1)
 
         # Training
         self.reward_holder = tf.placeholder(shape=[None], dtype=tf.float32)
         self.action_holder = tf.placeholder(shape=[None], dtype=tf.int32)
 
+        self.entropy = -tf.reduce_sum(self.output * tf.log(self.output))
         self.indexes = (tf.range(0, tf.shape(self.output)[0])
                         * tf.shape(self.output)[1] + self.action_holder)
         self.responsible_outputs = tf.gather(tf.reshape(self.output, [-1]), self.indexes)
 
-        self.loss = -tf.reduce_mean(tf.log(self.responsible_outputs) * self.reward_holder)
+        self.pg_loss = -tf.reduce_mean(tf.log(self.responsible_outputs) * self.reward_holder)
+        if entropy_w != 0.:
+            self.ent_loss = -entropy_w * self.entropy
+        else:  # avoid NaN entropy at convergence
+            self.ent_loss = tf.constant(0.)
+        self.loss = self.pg_loss + self.ent_loss
 
         tvars = tf.trainable_variables()
         self.gradient_holders = []
