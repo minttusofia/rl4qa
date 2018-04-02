@@ -19,13 +19,14 @@ def summary(configuration):
     return '_'.join([('%s=%s' % (k, v)) for (k, v) in kvs])
 
 
-def to_cmd(c, _path=None):
-    command = 'sh ../python3.c -m rl.main --dirname 04_01/cl1 --lr {} --gamma {} --update_freq {} ' \
+def to_cmd(c, dirname, run_id):
+    command = 'sh ../python3.c -m rl.main --dirname {} --lr {} --gamma {} --update_freq {} ' \
               '{} {} --default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
-              '--qtype all --actions all-30 --verbose 1 ' \
-              '--run_id 1 --num_items_train 300000 --num_items_eval 500 --redis_host ' \
+              '--qtype all --actions all-30 --verbose 2 ' \
+              '--run_id {} --num_items_train 300000 --num_items_eval 500 --redis_host ' \
               'cannon.cs.ucl.ac.uk' \
-              ''.format(c['lr'],
+              ''.format(dirname,
+                        c['lr'],
                         c['gamma'],
                         c['update_freq'],
                         c['baseline'],
@@ -33,12 +34,14 @@ def to_cmd(c, _path=None):
                         c['default_r'],
                         c['found_candidate_r'],
                         c['penalty'],
-                        c['success_r'])
+                        c['success_r'],
+                        run_id)
     return command
 
 
-def to_logfile(c, path):
-    outfile = os.path.join(path, "uclcs_v1.%s.log" % summary(c).replace("/", "_"))
+def to_logfile(c, path, dirname, run_id):
+    path = os.path.join(path, dirname)
+    outfile = os.path.join(path, "uclcs_v1.{}{}.log".format(summary(c).replace("/", "_")), run_id)
     return outfile
 
 
@@ -51,7 +54,6 @@ def main(argv):
     argparser.add_argument('--path', '-p', action='store', type=str, default=None, help='Path')
 
     args = argparser.parse_args(argv)
-
 
     default_hyperparameters = dict(
         lr=[1e-3],
@@ -92,6 +94,9 @@ def main(argv):
         update_freq=[20]
     )
 
+    dirname = '04_01/cl1'
+    run_id_base = '1'
+
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
     current_experiment.update(hyperparameters_space_4)
@@ -108,8 +113,10 @@ def main(argv):
     configurations = list(configurations)
 
     command_lines = set()
-    for cfg in configurations:
-        logfile = to_logfile(cfg, path)
+    for c in range(len(configurations)):
+        cfg = configurations[c]
+        run_id = '{}-{}'.format(run_id_base, c + 1)
+        logfile = to_logfile(cfg, path, dirname, run_id)
 
         completed = False
         if os.path.isfile(logfile):
@@ -118,7 +125,7 @@ def main(argv):
                 completed = 'Relation specific results' in content
 
         if not completed:
-            command_line = '{} > {} 2>&1'.format(to_cmd(cfg, _path=args.path), logfile)
+            command_line = '{} > {} 2>&1'.format(to_cmd(cfg, dirname, run_id), logfile)
             command_lines |= {command_line}
 
     # Sort command lines and remove duplicates
