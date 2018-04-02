@@ -102,7 +102,7 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
             reward = found_candidate_r
             if is_last_action:
                 reward = penalty
-            verbose_print(1, verbosity_level, '   Found incorrect answer candidate', answer.text)
+            verbose_print(2, verbosity_level, '   Found incorrect answer candidate', answer.text)
             incorrect_answers_this_episode.append(answer.text.lower())
             if e not in incorrects:
                 incorrects.append(e)
@@ -312,7 +312,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             run_type = 'final eval'
     for e in range(num_episodes):
         question = Question(dataset[e % len(dataset)])
-        verbose_print(2, args.verbose,
+        verbose_print(1, args.verbose,
                       '{} : {}     {} - {} ({})'.format(e, question.query, question.id, run_type,
                                                         num_episodes))
         q_type, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
@@ -382,8 +382,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server,
                                                       question.id, top_idx)
             ans_t = rc_answers[0]
-            subj_t = check_answer_confidence(ans_t, args.conf_threshold, nouns, question, top_idx,
-                                             args.verbose)
+            subj_t = check_answer_confidence(ans_t, args.conf_threshold, nouns, question.id,
+                                             top_idx, args.verbose)
 
             # Option: don't check answers with confidence < threshold
             (r, incorrect_answers_this_episode, corrects, incorrects) = (
