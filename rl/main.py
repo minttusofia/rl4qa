@@ -9,6 +9,7 @@ import tensorflow as tf
 from bisect import bisect
 from collections import defaultdict
 from jack import readers
+from memory_profiler import profile
 
 from ir.search_engine import SearchEngine
 from playground.datareader import format_paths
@@ -16,7 +17,7 @@ from qa.nouns import pre_extract_nouns, SpacyNounParser, NltkNounParser
 from qa.question import Question
 from rl.actions import action_space_for_id
 from rc.utils import get_rc_answers, get_cached_rc_answers
-from rl.agent import Agent, RandomAgent, Reinforce
+from rl.agent import RandomAgent, Reinforce
 from rl.embeddings import GloveLookup
 from shared.utils import check_answer_confidence, get_document_for_query, form_query, trim_index
 from shared.utils import verbose_print
@@ -155,10 +156,10 @@ def write_eval_file(eval_path, corrects, incorrects, num_episodes):
     if not os.path.exists(os.path.dirname(eval_path)):
         os.makedirs(os.path.dirname(eval_path))
     with open(eval_path, 'w') as f:
-        f.write(eval_path)
-        f.write('Correct {}/{} = {}'.format(len(corrects), num_episodes,
-                                            float(len(corrects))/num_episodes))
-        f.write('\nIncorrect {}/{} = {}'.format(len(incorrects), num_episodes,
+        f.write('{}\n'.format(eval_path))
+        f.write('Correct {}/{} = {}\n'.format(len(corrects), num_episodes,
+                                              float(len(corrects))/num_episodes))
+        f.write('Incorrect {}/{} = {}\n'.format(len(incorrects), num_episodes,
                                                 float(len(incorrects))/num_episodes))
 
 
@@ -169,6 +170,7 @@ def verbose_print_model_weights(sess, args):
             print(var, '\n', sess.run(var))
 
 
+@profile
 def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, agent=None, dev=False, eval_dataset=None,
               eval_search_engine=None, eval_nouns=None, existing_session=None,
@@ -228,6 +230,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     else:
         # Repeat if num_episodes > len(dataset)
         num_episodes = args.num_items_train
+
+    # TEMPRORARY
+    num_episodes = 5000 if train else num_episodes
 
     # Only used when eval_dataset is not None, must be > checkpoint_freq
     eval_freq = 4000
@@ -727,7 +732,7 @@ def initialise(args, dev=False):
     return dataset, search_engine, nouns, reader, redis_server
 
 
-if __name__ == "__main__":
+def main():
     args = parse_args()
     set_random_seed(args.seed)
     dataset, search_engine, nouns, reader, redis_server = initialise(args)
@@ -758,8 +763,13 @@ if __name__ == "__main__":
     if checkpoint_path is not None:
         # Use custom checkpoint ('final' by default)
         checkpoint_path += args.checkpoint_episode + '.ckpt'
+        print('Loading model from checkpoint', checkpoint_path)
 
     if args.eval:
         # Run final evaluation
         run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
                   redis_server, embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
+
+
+if __name__ == "__main__":
+    main()
