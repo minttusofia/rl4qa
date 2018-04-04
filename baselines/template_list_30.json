@@ -1,0 +1,42 @@
+[
+  ["what is"],
+  ["where is"],
+  ["who is"],
+  ["what does"],
+
+  ["what is", "a part of"],
+  ["what is", "an instance of"],
+  ["who made"],
+
+  ["what does", "work as"],
+  ["where does", "work"],
+  ["what does", "do"],
+
+  ["where was", "born"],
+  ["where is", "from"],
+
+  ["who is the employer of"],
+  ["who is related to"],
+  ["who is friend of"],
+  ["who does", "work with"],
+  ["who likes"],
+  ["who knows"],
+
+  ["what is", "known for"],
+  ["what type is"],
+
+  ["how big is"],
+  ["how old is"],
+
+  ["what genre is"],
+
+  ["when was", "born"],
+  ["when did", "die"],
+
+  ["what language does", "speak"],
+  ["nationality of"],
+  ["what language is", "in"],
+
+  ["publisher of"],
+  ["when was", "published"]
+]

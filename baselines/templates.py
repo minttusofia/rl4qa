@@ -375,7 +375,7 @@ def eval_templates():
                         help='If set, evaluate the baseline on a subset of data.')
     parser.add_argument('--num_items_to_eval', default=None, type=int,
                         help='If set, the number of instances to evaluate. If not set, evaluate '
-                             'full dataset (or subset).')
+                             'full dataset (or current subset).')
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
     parser.add_argument('--wikihop_version', type=str, default='1.1',
@@ -383,7 +383,7 @@ def eval_templates():
     parser.add_argument('--dev', nargs='?', const=True, default=False,
                         help='If True, build an index on dev data instead of train.')
     parser.add_argument('--parallel', nargs='?', const=True, default=False, type=bool,
-                        help='If True, use NLTK to parse nouns. If False, use Spacy.')
+                        help='If True, evaluate multiple questions in parallel.')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
@@ -392,6 +392,8 @@ def eval_templates():
                         help='Confidence threshold required to use ')
     parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
                         help='If True, save the QA results in a CSV file.')
+    parser.add_argument('--seed', type=int, default=0,
+                        help='Random seed.')
     parser.add_argument('--templates_from_file', default='baselines/template_list_70.json',
                         type=str, help='File from which to read question templates.')
     parser.set_defaults(cache=True, trim_index=True)
@@ -430,7 +432,7 @@ def eval_templates():
     # Whether to penalise answer length
     penalize_long_answers = False
     # Make experiments repeatable
-    random.seed(0)
+    random.seed(args.seed)
 
     verbose = args.verbose
     evaluate_nouns = False
