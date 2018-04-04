@@ -155,6 +155,7 @@ def write_eval_file(eval_path, corrects, incorrects, num_episodes):
     if not os.path.exists(os.path.dirname(eval_path)):
         os.makedirs(os.path.dirname(eval_path))
     with open(eval_path, 'w') as f:
+        f.write(eval_path)
         f.write('Correct {}/{} = {}'.format(len(corrects), num_episodes,
                                             float(len(corrects))/num_episodes))
         f.write('\nIncorrect {}/{} = {}'.format(len(incorrects), num_episodes,
