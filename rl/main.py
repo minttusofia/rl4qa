@@ -231,9 +231,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         # Repeat if num_episodes > len(dataset)
         num_episodes = args.num_items_train
 
-    # TEMPRORARY
-    num_episodes = 5000 if train else num_episodes
-
     # Only used when eval_dataset is not None, must be > checkpoint_freq
     eval_freq = 4000
 
@@ -766,7 +763,8 @@ def main():
         print('Loading model from checkpoint', checkpoint_path)
 
     if args.eval:
-        # Run final evaluation
+        # Make final evaluation repeatable
+        set_random_seed(args.seed)
         run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
                   redis_server, embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
 
