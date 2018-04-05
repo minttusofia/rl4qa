@@ -9,7 +9,6 @@ import tensorflow as tf
 from bisect import bisect
 from collections import defaultdict
 from jack import readers
-from memory_profiler import profile
 
 from ir.search_engine import SearchEngine
 from playground.datareader import format_paths
@@ -170,7 +169,6 @@ def verbose_print_model_weights(sess, args):
             print(var, '\n', sess.run(var))
 
 
-@profile
 def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
               agent_from_checkpoint=None, agent=None, dev=False, eval_dataset=None,
               eval_search_engine=None, eval_nouns=None, existing_session=None,
@@ -231,9 +229,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         # Repeat if num_episodes > len(dataset)
         num_episodes = args.num_items_train
 
-    # Only used when eval_dataset is not None, must be > checkpoint_freq
+    # Only used when eval_dataset is not None
     eval_freq = 4000
-
     checkpoint_freq = 500
     emb_dim = 50
 
