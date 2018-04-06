@@ -327,8 +327,11 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
 
 
 def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold,
-                    str_noun_parser_class, templates_from_file):
+                    str_noun_parser_class, templates_from_file, qtypes_from_file):
     csv_path = 'baselines/data'
+
+    # trim 'baselines/' and '.json'
+    qtypes = '' if qtypes_from_file is None else '_' + qtypes_from_file[:-5].split('baselines/')[-1]
     csv_filename = (data_path[:-5].split('wikihop/')[-1]  # trim './data/wikihop/' and '.json',
                                                           # to keep version directory and filename
                                                           # e.g. 'v1.1/train_ids'
@@ -338,6 +341,7 @@ def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshol
                     + '_' + str_noun_parser_class
                     + '_' + templates_from_file[:-5].split('baselines/')[-1]  # keep templates
                                                                               # filename
+                    + qtypes
                     + '.csv')
     return os.path.join(csv_path, csv_filename)
 
@@ -392,8 +396,10 @@ def eval_templates():
                         help='Confidence threshold required to use ')
     parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
                         help='If True, save the QA results in a CSV file.')
-    parser.add_argument('--seed', type=int, default=0,
+    parser.add_argument('--seed', type=int, default=None,
                         help='Random seed.')
+    parser.add_argument('--qtypes_from_file', type=str, default=None,
+                        help='If set, use only qtypes from the specified json file.')
     parser.add_argument('--templates_from_file', default='baselines/template_list_70.json',
                         type=str, help='File from which to read question templates.')
     parser.set_defaults(cache=True, trim_index=True)
@@ -431,21 +437,21 @@ def eval_templates():
     confidence_threshold = args.conf_threshold
     # Whether to penalise answer length
     penalize_long_answers = False
-    # Make experiments repeatable
-    random.seed(args.seed)
+    if args.seed is not None
+        # Make experiments repeatable
+        random.seed(args.seed)
 
     verbose = args.verbose
     evaluate_nouns = False
 
-    one_type_only = False  # Set to True to evaluate templates on a single relation type
-    included_type = 'located_in_the_administrative_territorial_entity'
-    one_type_dataset = []
-    if one_type_only:
+    if args.qtypes_from_file is not None:
+        included_types = json.load(open(args.qtypes_from_file))
+        qtype_dataset = []
         for q in dataset:
-            if q['query'].split()[0] == included_type:
-                one_type_dataset.append(q)
+            if q['query'].split()[0] in included_types:
+                qtype_dataset.append(q)
 
-        dataset = one_type_dataset
+        dataset = qtype_dataset
 
     # Number of instances to test (<= subset size)
     if args.num_items_to_eval is None:
@@ -466,7 +472,8 @@ def eval_templates():
     csv_path = None
     if args.store_results:
         csv_path = format_csv_path(data_path, len(dataset), max_num_queries, args.conf_threshold,
-                                   str_noun_parser_class, args.templates_from_file)
+                                   str_noun_parser_class, args.templates_from_file,
+                                   args.qtypes_from_file)
         print('Collecting data to', csv_path)
         if os.path.exists(csv_path):
             csv_reader = csv.reader(open(csv_path))
