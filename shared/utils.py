@@ -94,7 +94,7 @@ def get_document_for_query(action, subj, search_engine, question, nouns, queries
 
 def check_answer_confidence(answer, confidence_threshold, nouns, question_id, top_idx,
                             verbose_level=0):
-    if answer.score > confidence_threshold:
+    if confidence_threshold is None or answer.score > confidence_threshold:
         return answer.text.lower()
     else:
         # Pick a noun phrase at random from top document

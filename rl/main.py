@@ -35,6 +35,7 @@ def format_run_id(args):
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
+                  + '-{}'.format(args.reader)
                   + '{}'.format(dev_sizes)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
@@ -44,6 +45,7 @@ def format_run_id(args):
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
                   + '{}'.format(baseline_str)
+                  + '-{}'.format(args.reader)
                   + '{}'.format(dataset_sizes)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
@@ -233,6 +235,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     eval_freq = 4000
     checkpoint_freq = 500
     emb_dim = 50
+    conf_threshold = args.conf_threshold if args.reader == 'fastqa' else None
 
     if args.run_id is not None:
         run_id = format_run_id(args)
@@ -393,7 +396,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 rc_answers, _ = get_cached_rc_answers(reader, query_t, d_t, redis_server,
                                                       question.id, top_idx)
             ans_t = rc_answers[0]
-            subj_t = check_answer_confidence(ans_t, args.conf_threshold, nouns, question.id,
+            subj_t = check_answer_confidence(ans_t, conf_threshold, nouns, question.id,
                                              top_idx, args.verbose)
 
             # Option: don't check answers with confidence < threshold
@@ -548,6 +551,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
                         help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
+    parser.add_argument('--reader', default='fastqa', type=str,
+                        help='Reading comprehension model to use. One of [ fastqa | bidaf ].')
     parser.add_argument('--verbose', default=0, type=int,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--verbose_weights', nargs='?', const=True, default=False, type=bool,
@@ -709,11 +714,16 @@ def initialise(args, dev=False):
     if dev:
         return dataset, search_engine, nouns
 
-    print('Initialising reader...')
-    reader = readers.reader_from_file('./rc/fastqa_reader')
+    print('Initialising {}...'.format(args.reader))
+    reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
+
     redis_server = None
     if args.cache:
-        redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=0)
+        if args.reader == 'fastqa':
+            redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=0)
+        elif args.reader == 'bidaf':
+            redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=1)
+
         try:
             redis_server.client_list()
         except redis.exceptions.ConnectionError:
