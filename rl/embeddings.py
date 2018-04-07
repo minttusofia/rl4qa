@@ -50,6 +50,7 @@ class GloveLookup:
         self.oov_idf = 1.
         print('\nLoading GloVe...')
         if vocab_from_file is not None and os.path.exists(vocab_from_file):
+            print('Loaded vocabulary from', vocab_from_file)
             vocab = set(json.load(io.open(vocab_from_file, 'r', encoding='utf-8')))
         else:
             vocab = vocab_for_dataset(dataset)

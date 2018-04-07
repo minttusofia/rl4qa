@@ -6,7 +6,6 @@ import random
 import redis
 import tensorflow as tf
 
-from bisect import bisect
 from collections import defaultdict
 from jack import readers
 
@@ -18,66 +17,10 @@ from rl.actions import action_space_for_id
 from rc.utils import get_rc_answers, get_cached_rc_answers
 from rl.agent import RandomAgent, Reinforce
 from rl.embeddings import GloveLookup
+from rl.utils import accuracy_from_history, format_experiment_paths, format_run_id, scalar_summaries
+from rl.utils import write_eval_file, write_summary
 from shared.utils import check_answer_confidence, get_document_for_query, form_query, trim_index
 from shared.utils import verbose_print
-
-
-def format_run_id(args):
-    if args.run_id is None:
-        return None
-    dev_sizes = '' if args.num_items_eval is None else '-dev{}'.format(args.num_items_eval)
-    dev_sizes += ('' if args.num_items_final_eval is None
-                   else '-final{}'.format(args.num_items_final_eval))
-    dataset_sizes = ('' if args.num_items_train is None else '-train{}'.format(args.num_items_train)
-                     + dev_sizes)
-    baseline_str = '' if args.baseline is None else '-{}bl'.format(args.baseline)
-    if args.random_agent:
-        run_id = ('random-'
-                  + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
-                                                     args.penalty, args.success_r])
-                  + '-{}'.format(args.reader)
-                  + '{}'.format(dev_sizes)
-                  + '-max{}-s{}'.format(args.max_queries, args.seed))
-    else:
-        run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
-                  + '-ew{}-init{}'.format(args.entropy_w, args.num_init_random_steps)
-                  + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
-                  + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
-                                                     args.penalty, args.success_r])
-                  + '{}'.format(baseline_str)
-                  + '-{}'.format(args.reader)
-                  + '{}'.format(dataset_sizes)
-                  + '-max{}-s{}'.format(args.max_queries, args.seed))
-    if args.run_id != '':
-        run_id += '-' + args.run_id
-    return run_id
-
-
-def format_experiment_paths(query_type, actions, backtracking, run_id, dirname, dev=False,
-                            save_checkpoints=True):
-    checkpoint_path = None
-    if dirname is not None:
-        dirname += '/'
-    else:
-        dirname = ''
-
-    if actions is not None:
-        actions = '/' + actions
-        if backtracking:
-            actions += '_bt'
-    else:
-        actions = 'bt' if backtracking else ''
-
-    if save_checkpoints:
-        checkpoint_path = 'rl/checkpoints/{}{}{}/{}/model-'.format(dirname, query_type,
-                                                                   actions, run_id)
-    # Use same path for train and dev as names of plots written to specify train/dev
-    summaries_path = 'rl/summaries/{}{}{}/train/{}'.format(dirname, query_type, actions, run_id)
-    if dev:
-        eval_path = 'rl/eval/{}{}{}/dev/{}.txt'.format(dirname, query_type, actions, run_id)
-    else:
-        eval_path = 'rl/eval/{}{}{}/train/{}.txt'.format(dirname, query_type, actions, run_id)
-    return summaries_path, checkpoint_path, eval_path
 
 
 def discount_rewards(r, gamma):
@@ -113,55 +56,6 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
         reward = penalty
 
     return reward, incorrect_answers_this_episode, corrects, incorrects
-
-
-def accuracy_from_history(corrects, ep, horizon=100):
-    if horizon is None:
-        return float(len(corrects))/(ep + 1)
-    first_in_horizon = bisect(corrects, ep - horizon)
-    # Number of episodes passed
-    ep += 1
-    accuracy = float(len(corrects[first_in_horizon:])) / min(horizon, ep)
-    if ep <= horizon:
-        if not np.isclose(accuracy, float(len(corrects)) / ep):
-            print(accuracy, float(len(corrects)) / ep, len(corrects), ep)
-        assert np.isclose(accuracy, float(len(corrects)) / ep)
-    return accuracy
-
-
-def scalar_summaries(running_reward, ep_length, corrects, ep, dev=False):
-    accuracy_horizon = 100
-    accuracy = accuracy_from_history(corrects, ep, accuracy_horizon)
-    if dev:
-        return {'reward, dev': running_reward,
-                'episode_length, dev': ep_length,
-                'accuracy ({}), dev'.format(accuracy_horizon): accuracy}
-    else:
-        return {'reward': running_reward,
-                'episode_length': ep_length,
-                'accuracy ({})'.format(accuracy_horizon): accuracy}
-
-
-def write_summary(summary_writer, episode, simple_values, summary_objects=None):
-    scalar_summary = tf.Summary()
-    for k, v in simple_values.items():
-        scalar_summary.value.add(simple_value=v, tag=k)
-    summary_writer.add_summary(scalar_summary, episode)
-    if summary_objects is not None:
-        for s in summary_objects:
-            summary_writer.add_summary(s, episode)
-    summary_writer.flush()
-
-
-def write_eval_file(eval_path, corrects, incorrects, num_episodes):
-    if not os.path.exists(os.path.dirname(eval_path)):
-        os.makedirs(os.path.dirname(eval_path))
-    with open(eval_path, 'w') as f:
-        f.write('{}\n'.format(eval_path))
-        f.write('Correct {}/{} = {}\n'.format(len(corrects), num_episodes,
-                                              float(len(corrects))/num_episodes))
-        f.write('Incorrect {}/{} = {}\n'.format(len(incorrects), num_episodes,
-                                                float(len(incorrects))/num_episodes))
 
 
 def verbose_print_model_weights(sess, args):
@@ -260,8 +154,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                                     (new_reward + (current_e - 1) * baseline_r)/current_e)
 
     num_state_parts = 5
-    # TODO: allow sets of types
-    types_in_state = args.qtype == 'all'
+    types_in_state = args.qtype == 'all' or len(args.qtype.split(',')) > 1
     if types_in_state:
         num_state_parts += 1
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
