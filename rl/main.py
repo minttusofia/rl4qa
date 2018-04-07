@@ -762,19 +762,19 @@ def main():
                   eval_dataset=interm_eval_dataset, eval_search_engine=eval_search_engine,
                   eval_nouns=eval_nouns)
 
-    run_id = format_run_id(args)
-    _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, args.backtrack,
-                                                    run_id, args.dirname)
-    if args.model_from_checkpoint:
-        # Replace default formatted run_id with custom argument
-        checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],
-                                                  args.model_from_checkpoint)
-    if checkpoint_path is not None:
-        # Use custom checkpoint ('final' by default)
-        checkpoint_path += args.checkpoint_episode + '.ckpt'
-        print('Loading model from checkpoint', checkpoint_path)
-
     if args.eval:
+        run_id = format_run_id(args)
+        _, checkpoint_path, _ = format_experiment_paths(args.qtype, args.actions, args.backtrack,
+                                                        run_id, args.dirname)
+        if args.model_from_checkpoint:
+            # Replace default formatted run_id with custom argument
+            checkpoint_path = checkpoint_path.replace(checkpoint_path.split('/')[-2],
+                                                      args.model_from_checkpoint)
+        if checkpoint_path is not None:
+            # Use custom checkpoint ('final' by default)
+            checkpoint_path += args.checkpoint_episode + '.ckpt'
+            print('Loading model from checkpoint', checkpoint_path)
+
         # Make final evaluation repeatable
         set_random_seed(args.seed)
         run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
