@@ -10,13 +10,11 @@ from jack.io import embeddings
 
 def vocab_for_dataset(dataset):
     vocab = set()
-    counts = defaultdict(int)
     for question in dataset:
         for doc in question['supports']:
             for w in doc.split():
                 vocab.add(w)
-                counts[w] += 1
-    return vocab, counts
+    return vocab
 
 
 def idf_for_dataset(dataset, use_lowercase=True):
@@ -43,16 +41,21 @@ def unit_sphere(var_matrix, norm=1.0, axis=1):
 
 
 class GloveLookup:
-    def __init__(self, path, dim, dataset, idf_from_file='rl/idf_lower_logN-n.json',
-                 oov_from_file='rl/oov_embs.json'):
+    def __init__(self, path, dim, dataset=None, idf_from_file='rl/idf_lower_logN-n.json',
+                 oov_from_file='rl/oov_embs.json', vocab_from_file='rl/train_vocab.json'):
         self.emb_dim = dim
         # IDF weight for randomly initialised embeddings for train time OOV words (low even if rare)
         self.rand_init_idf = 1.
         # IDF weight for test time OOV words (low even if rare)
         self.oov_idf = 1.
         print('\nLoading GloVe...')
-        vocab, _ = vocab_for_dataset(dataset)
-        print('Train vocab length', len(vocab))
+        if vocab_from_file is not None and os.path.exists(vocab_from_file):
+            vocab = set(json.load(io.open(vocab_from_file, 'r', encoding='utf-8')))
+        else:
+            vocab = vocab_for_dataset(dataset)
+            print('Saving vocabulary of size', len(vocab), 'to', vocab_from_file)
+            json.dump(list(vocab), io.open(vocab_from_file, 'w', encoding='utf-8'),
+                      ensure_ascii=False)
         if idf_from_file is not None and os.path.exists(idf_from_file):
             self.idf = defaultdict(float)
             print('Loaded IDF weights from', idf_from_file)
@@ -96,7 +99,6 @@ class GloveLookup:
             # Override idf dictionary default log(N/n_t)
             self.idf[word] = self.rand_init_idf
 
-        # TODO: learn linear transformation for task
         print('Initialised', len(self.word2idx) - num_glove_words, 'new words')
         self.oov = np.zeros(dim)
         self.oov[0] = 1
@@ -106,7 +108,7 @@ class GloveLookup:
         self.state_str_history = []
         self.state_history = []
         self.avg_state_history = []
-        self.dataset_len = len(dataset)
+        self.dataset_len = len(dataset) if dataset is not None else None
 
     def save_history_to_csv(self):
         print('History length', len(self.state_history), len(self.state_str_history),

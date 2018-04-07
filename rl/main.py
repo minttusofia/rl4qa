@@ -538,13 +538,14 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     # TODO: save activations of hidden layers
     if args.save_embs:
         embs.save_history_to_csv()
-    print('\nDev set accuracy:' if dev else '\nTrain set accuracy:')
-    print('Correct answers final', len(corrects), '/', num_episodes,
-          float(len(corrects))/num_episodes)
-    print('Incorrect answers final', len(incorrects), '/', num_episodes,
-          float(len(incorrects))/num_episodes, '\n')
-    if args.run_id is not None:
-        write_eval_file(eval_path, corrects, incorrects, num_episodes)
+    if num_episodes > 0:
+        print('\nDev set accuracy:' if dev else '\nTrain set accuracy:')
+        print('Correct answers final', len(corrects), '/', num_episodes,
+              float(len(corrects))/num_episodes)
+        print('Incorrect answers final', len(incorrects), '/', num_episodes,
+              float(len(incorrects))/num_episodes, '\n')
+        if args.run_id is not None:
+            write_eval_file(eval_path, corrects, incorrects, num_episodes)
 
 
 def parse_args():
@@ -655,7 +656,7 @@ def set_random_seed(seed):
 
 
 def clean_missing_subjects(dataset):
-    items_to_remove = ['WH_dev_1559','WH_dev_5113']  # These have no question subject
+    items_to_remove = ['WH_dev_1559', 'WH_dev_5113']  # These have no question subject
     i = 0
     while i < len(dataset):
         if dataset[i]['id'] in items_to_remove:
@@ -665,54 +666,57 @@ def clean_missing_subjects(dataset):
 
 
 def initialise(args, dev=False):
-    subset_id, data_path, index_filename, nouns_path = format_paths(args, dev)
-    print('\nInitialising dev data...' if dev else '\nInitialising train data...')
-    with open(data_path) as dataset_file:
-        dataset = json.load(dataset_file)
-    if args.subset_size is not None:
-        dataset = dataset[:args.subset_size]
-    search_engine = SearchEngine(dataset, load_from_path=index_filename)
+    # If loading trained model from checkpoint, don't initialise train data
+    dataset, search_engine, nouns = None, None, None
+    if args.model_from_checkpoint is None or dev:  # don't load seach engine or nouns for train data
+        print('\nInitialising dev data...' if dev else '\nInitialising train data...')
+        subset_id, data_path, index_filename, nouns_path = format_paths(args, dev)
+        with open(data_path) as dataset_file:
+            dataset = json.load(dataset_file)
+        if args.subset_size is not None:
+            dataset = dataset[:args.subset_size]
 
-    if args.spacy:
-        print('Extracting Spacy nouns...')
-        noun_parser_class = SpacyNounParser
-    else:
-        print('Extracting NTLK nouns...')
-        noun_parser_class = NltkNounParser
-    # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
-    nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
+        if dev:
+            # WH_dev_1559 and WH_dev_5113 have no question subject
+            clean_missing_subjects(dataset)
+        # Number of instances to include (if train and > subset size, repeat items)
+        num_items = len(dataset)
+        if args.num_items_train is not None and not dev:
+            num_items = args.num_items_train
+        elif dev:
+            if args.num_items_eval is None:
+                args.num_items_eval = len(dataset)
+            if args.num_items_final_eval is None:
+                args.num_items_final_eval = len(dataset)
+            num_items = max(args.num_items_eval, args.num_items_final_eval)
 
-    if dev:
-        # WH_dev_1559 and WH_dev_5113 have no question subject
-        clean_missing_subjects(dataset)
-    # Number of instances to include (if train and > subset size, repeat items)
-    num_items = len(dataset)
-    if args.num_items_train is not None and not dev:
-        num_items = args.num_items_train
-    elif dev:
-        if args.num_items_eval is None:
-            args.num_items_eval = len(dataset)
-        if args.num_items_final_eval is None:
-            args.num_items_final_eval = len(dataset)
-        num_items = max(args.num_items_eval, args.num_items_final_eval)
+        filter_by_type = args.qtype != 'all'
+        if filter_by_type:
+            included_types = args.qtype.split(',')
+            filtered_dataset = []
+            for q in dataset:
+                if q['query'].split()[0] in included_types:
+                    filtered_dataset.append(q)
+            dataset = filtered_dataset
 
-    # TODO: allow sets of types
-    one_type_only = args.qtype != 'all'
-    if one_type_only:
-        one_type_dataset = []
-        for q in dataset:
-            if q['query'].split()[0] == args.qtype:
-                one_type_dataset.append(q)
+        dataset = dataset[:num_items]
+        print('Loaded', len(dataset), 'questions')
 
-        dataset = one_type_dataset
+        search_engine = SearchEngine(dataset, load_from_path=index_filename)
+        if args.spacy:
 
-    dataset = dataset[:num_items]
-    print('Loaded', len(dataset), 'questions')
+            print('Extracting Spacy nouns...')
+            noun_parser_class = SpacyNounParser
+        else:
+            print('Extracting NTLK nouns...')
+            noun_parser_class = NltkNounParser
+        # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
+        nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
 
-    if args.trim_index:
-        nouns, search_engine = trim_index(dataset, nouns, search_engine)
-    if dev:
-        return dataset, search_engine, nouns
+        if args.trim_index:
+            nouns, search_engine = trim_index(dataset, nouns, search_engine)
+        if dev:
+            return dataset, search_engine, nouns
 
     print('Initialising {}...'.format(args.reader))
     reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
@@ -745,11 +749,12 @@ def main():
     if args.eval:
         # Evaluate on dev data
         eval_dataset, eval_search_engine, eval_nouns = initialise(args, dev=True)
-        interm_eval_dataset = eval_dataset[:args.num_items_eval]
+        if args.num_items_eval is not None and args.num_items_eval > 0:
+            interm_eval_dataset = eval_dataset[:args.num_items_eval]
 
     emb_dim = 50
     # Initialise with train set
-    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim, dataset)
+    embs = GloveLookup('./data/GloVe/glove.6B.%id.txt' % emb_dim, emb_dim)
 
     if args.model_from_checkpoint is None:
         # Train agent
