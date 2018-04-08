@@ -159,6 +159,15 @@ def main(argv):
         gamma=[0.8]
     )
 
+    hyperparameters_space_7 = dict(
+        baseline=['--baseline=mean', ''],
+        backtrack=['--backtrack', ''],
+        num_init_random_steps=[0, 10000],
+        entropy_w=[0., 0.001],
+        reader=['bidaf', 'fastqa'],
+        gamma=[0.5, 0.8],
+    )
+
     dirname = args.dirname
     run_id_base = args.run_id_base
 
@@ -181,7 +190,7 @@ def main(argv):
     job_id = 1
     for c in range(len(configurations)):
         cfg = configurations[c]
-        for seed in range(0, 2):
+        for seed in range(0, 1):
             run_id = '{}-{}-{}-{}'.format(run_id_base, job_id, c + 1, seed)
             cfg['seed'] = seed
             logfile = to_logfile(cfg, path, dirname, run_id)
