@@ -201,8 +201,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         else:
             run_type = 'final eval'
     for e in range(num_episodes):
+        verbose = 2 if e % 500 == 0 else args.verbose  # Log in detail every 500 episodes
         question = Question(dataset[e % len(dataset)])
-        verbose_print(1, args.verbose,
+        verbose_print(1, verbose,
                       '{} : {}     {} - {} ({})'.format(e, question.query, question.id, run_type,
                                                         num_episodes))
         q_type, subj0 = question.query.split()[0], ' '.join(question.query.split()[1:]).lower()
@@ -237,7 +238,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                         # Should state that we backtrack to be aware of the question that was asked?
                         s_prev = state_history[-1]
                         subj_prev = subj_history[-1]
-                        verbose_print(2, args.verbose, '  Backtracking to subject', subj_prev)
+                        verbose_print(2, verbose, '  Backtracking to subject', subj_prev)
                         if len(state_history) > 1:
                             a_t = np.random.randint(len(actions))
                         else:  # Remove backtrack
@@ -260,7 +261,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                         # Should state that we backtrack to be aware of the question that was asked?
                         s_prev = state_history[-1]
                         subj_prev = subj_history[-1]
-                        verbose_print(2, args.verbose, '  Backtracking to subject', subj_prev)
+                        verbose_print(2, verbose, '  Backtracking to subject', subj_prev)
                         a_distr = sess.run(agent.output, feed_dict={agent.state_in: [s_prev]})
                         if len(state_history) > 1:
                             a_t = np.random.choice(range(len(actions)), p=a_distr[0])
@@ -270,17 +271,17 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
                 top_idx, subj_prev, query_t = get_document_for_query(
                     actions[a_t], subj_prev, search_engine, question, nouns, queries_asked,
-                    args.verbose)
+                    verbose)
                 if top_idx is None:  # subject has been reset
                     s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev])
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
             if random_init:  # action was selected at random
-                verbose_print(2, args.verbose, '   init ({:2})'.format(a_t),
+                verbose_print(2, verbose, '   init ({:2})'.format(a_t),
                               form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
             else:
-                verbose_print(2, args.verbose, '   ({:2})'.format(a_t),
+                verbose_print(2, verbose, '   ({:2})'.format(a_t),
                               form_query(actions[a_t], subj_prev, 'red'), '  ->', top_idx)
             # Send query to RC module
             if redis_server is None:
@@ -290,13 +291,13 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                                                       question.id, top_idx)
             ans_t = rc_answers[0]
             subj_t = check_answer_confidence(ans_t, conf_threshold, nouns, question.id,
-                                             top_idx, args.verbose)
+                                             top_idx, verbose)
 
             # Option: don't check answers with confidence < threshold
             (r, incorrect_answers_this_episode, corrects, incorrects) = (
                 check_answer(ans_t, question, incorrect_answers_this_episode, e, corrects,
                              incorrects, t == max_queries - 1, args.default_r,
-                             args.found_candidate_r, args.penalty, args.success_r, args.verbose))
+                             args.found_candidate_r, args.penalty, args.success_r, verbose))
 
             # alternative: form_query(actions[a_t], subj_t)
             s_t = [subj0, ' '.join(actions[a_t]), subj_prev, d_t, subj_t]
@@ -317,14 +318,14 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
             ep_reward += r
             if r != args.default_r:
-                verbose_print(2, args.verbose, 'Received reward', r)
+                verbose_print(2, verbose, 'Received reward', r)
             ep_length = t
             if r == args.success_r:
                 # TODO: collect aggregate action history data
-                verbose_print(1, args.verbose, '\tAction history:', ep_history[:, 1])
+                verbose_print(1, verbose, '\tAction history:', ep_history[:, 1])
                 break
             elif r == args.penalty:
-                verbose_print(2, args.verbose, '( Correct answer', question.answer, ')')
+                verbose_print(2, verbose, '( Correct answer', question.answer, ')')
 
         if train:
             # TODO: baseline when non-terminal rewards != 0
@@ -339,18 +340,18 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                          agent.state_in: np.vstack(ep_history[:, 0])}
             grads, pg_loss, ent_loss = sess.run([agent.gradients, agent.pg_loss, agent.ent_loss],
                                                 feed_dict)
-            verbose_print(2, args.verbose,
+            verbose_print(2, verbose,
                           'PG Loss {}; Ent Loss {}; total {}'.format(pg_loss, ent_loss,
                                                                      pg_loss + ent_loss))
             if args.baseline is not None:
-                verbose_print(2, args.verbose,
+                verbose_print(2, verbose,
                               'Raw {}; B {}; effective {}'.format(raw_reward, baseline_reward,
                                                                   raw_reward - baseline_reward))
             for idx, grad in enumerate(grads):
                 gradBuffer[idx] += grad
 
             if e % args.update_freq == 0 and e != 0:
-                verbose_print(2, args.verbose, e, 'Updating policy')
+                verbose_print(2, verbose, e, 'Updating policy')
                 feed_dict = dict(zip(agent.gradient_holders, gradBuffer))
                 _ = sess.run(agent.update_batch, feed_dict)
                 for ix, grad in enumerate(gradBuffer):
@@ -380,12 +381,12 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         ep_length_history.append(len(ep_history))
 
         if e % 10 == 0:
-            verbose_print(1, args.verbose, '  Agent output',
+            verbose_print(1, verbose, '  Agent output',
                   sess.run(agent.output, feed_dict={agent.state_in: [s_prev]}))
-            verbose_print(1, args.verbose, '  Reward history', np.mean(reward_history[-100:]))
-            verbose_print(1, args.verbose,
+            verbose_print(1, verbose, '  Reward history', np.mean(reward_history[-100:]))
+            verbose_print(1, verbose,
                           '  Correct answers', len(corrects), float(len(corrects))/(e+1))
-            verbose_print(1, args.verbose,
+            verbose_print(1, verbose,
                           '  Incorrect answers', len(incorrects), float(len(incorrects))/(e+1))
 
         # Save to checkpoint and evaluate accuracy on dev set
