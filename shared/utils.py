@@ -18,31 +18,38 @@ def trim_index(dataset, nouns, search_engine, keep_most=False):
     """Trim index and pre-extracted nouns to only include instances included in dataset."""
     print('Trimming index...', end=' ')
     prev_time = time.time()
-    if len(dataset) != len(search_engine.shape_for_q) or len(dataset) != len(nouns):
+    if ((search_engine is not None and len(dataset) != len(search_engine.shape_for_q))
+        or (nouns is not None and len(dataset) != len(nouns))):
         # If most keys are kept, it's faster to delete unused than to copy shared
         if keep_most:
             dataset_keys = set([q['id'] for q in dataset])
             unused_index_keys = set(search_engine.shape_for_q.keys()) - dataset_keys
-            for k in unused_index_keys:
-                del search_engine.shape_for_q[k]
-                del search_engine.sparse_for_q[k]
-                del search_engine.vec_for_q[k]
-                del nouns[k]
+            if search_engine is not None:
+                for k in unused_index_keys:
+                    del search_engine.shape_for_q[k]
+                    del search_engine.sparse_for_q[k]
+                    del search_engine.vec_for_q[k]
+            if nouns is not None:
+                for k in unused_index_keys:
+                    del nouns[k]
         else:
-            one_type_nouns = {}
-            one_type_shape_for_q = {}
-            one_type_sparse_for_q = {}
-            one_type_vec_for_q = {}
-            for q in dataset:
-                one_type_nouns[q['id']] = nouns[q['id']]
-                one_type_shape_for_q[q['id']] = search_engine.shape_for_q[q['id']]
-                one_type_sparse_for_q[q['id']] = search_engine.sparse_for_q[q['id']]
-                one_type_vec_for_q[q['id']] = search_engine.vec_for_q[q['id']]
+            if nouns is not None:
+                one_type_nouns = {}
+                for q in dataset:
+                    one_type_nouns[q['id']] = nouns[q['id']]
+                nouns = one_type_nouns
+            if search_engine is not None:
+                one_type_shape_for_q = {}
+                one_type_sparse_for_q = {}
+                one_type_vec_for_q = {}
+                for q in dataset:
+                    one_type_shape_for_q[q['id']] = search_engine.shape_for_q[q['id']]
+                    one_type_sparse_for_q[q['id']] = search_engine.sparse_for_q[q['id']]
+                    one_type_vec_for_q[q['id']] = search_engine.vec_for_q[q['id']]
 
-            nouns = one_type_nouns
-            search_engine.shape_for_q = one_type_shape_for_q
-            search_engine.sparse_for_q = one_type_sparse_for_q
-            search_engine.vec_for_q = one_type_vec_for_q
+                search_engine.shape_for_q = one_type_shape_for_q
+                search_engine.sparse_for_q = one_type_sparse_for_q
+                search_engine.vec_for_q = one_type_vec_for_q
         gc.collect()
     print('({} s)'.format(time.time() - prev_time))
     return nouns, search_engine
