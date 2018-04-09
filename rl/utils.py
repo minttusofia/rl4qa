@@ -59,7 +59,7 @@ def format_experiment_paths(query_type, actions, backtracking, run_id, dirname, 
         checkpoint_path = 'rl/checkpoints/{}{}{}/{}/model-'.format(dirname, query_type,
                                                                    actions, run_id)
     # Use same path for train and dev as names of plots written to specify train/dev
-    summaries_path = 'rl/summaries/{}{}{}/train/{}'.format(dirname, query_type, actions, run_id)
+    summaries_path = 'rl/summaries/{}{}{}/{}'.format(dirname, query_type, actions, run_id)
     if dev:
         eval_path = 'rl/eval/{}{}{}/dev/{}.txt'.format(dirname, query_type, actions, run_id)
     else:
