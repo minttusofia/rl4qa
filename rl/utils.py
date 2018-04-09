@@ -22,6 +22,7 @@ def format_run_id(args):
                                                      args.penalty, args.success_r])
                   + '-{}'.format(args.reader)
                   + '{}'.format(dev_sizes)
+                  + '-conf{}'.format(args.conf_threshold)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     else:
         run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
@@ -32,6 +33,7 @@ def format_run_id(args):
                   + '{}'.format(baseline_str)
                   + '-{}'.format(args.reader)
                   + '{}'.format(dataset_sizes)
+                  + '-conf{}'.format(args.conf_threshold)
                   + '-max{}-s{}'.format(args.max_queries, args.seed))
     if args.run_id != '':
         run_id += '-' + args.run_id

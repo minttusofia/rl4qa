@@ -129,7 +129,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     eval_freq = 4000
     checkpoint_freq = 500
     emb_dim = 50
-    conf_threshold = args.conf_threshold if args.reader == 'fastqa' else None
+    conf_threshold = None  # args.conf_threshold if args.reader == 'fastqa' else None
 
     if args.run_id is not None:
         run_id = format_run_id(args)
@@ -475,7 +475,7 @@ def parse_args():
                         help='Host of running redis instance (e.g. localhost, cannon).')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
-    parser.add_argument('--conf_threshold', default=0.10, type=float,
+    parser.add_argument('--conf_threshold', default=None, type=float,
                         help='Confidence threshold required to use reading comprehension answer '
                              'in following query.')
 
