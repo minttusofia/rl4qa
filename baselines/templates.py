@@ -115,7 +115,8 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         if not verbose and i % 10 == 0:
             if i != 0:
                 t = print_time_taken(t)
-            print('Evaluating question', i, '/', min(len(dataset), num_items_to_eval))
+            print('Evaluating question', i, '/', min(len(dataset), num_items_to_eval), end=' - ')
+            print_accuracy(correct_answers, i)
         question = Question(dataset[i % len(dataset)])
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
         if type(templates) == dict:  # if templates are assigned to query types
@@ -170,10 +171,10 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
             score = answer.score
             if penalize_long_answers:
                 score *= discount_by_answer_length(answer)
-            if score > confidence_threshold:
+            if confidence_threshold is None or score > confidence_threshold:
                 prev_subj = answer.text.lower()
                 if verbose:
-                    print('\t->', prev_subj, '(', answer.score, ')')
+                    print('\t->', prev_subj, '(', score, ')')
                 # If current answer is an answer candidate, submit it
                 if answer.text.lower() in question.candidates_lower:
                     if answer.text.lower() == question.answer.lower():
@@ -190,7 +191,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                             seen_incorrect_answer_this_episode = True
             else:
                 if verbose:
-                    print('\t->', prev_subj, '(', answer.score, ') -> pick at random')
+                    print('\t->', prev_subj, '(', score, ') -> pick at random')
                 # Pick a noun phrase at random from top document
                 rand_draw = randint(0, len(nouns[question.id][top_idx])-1)
                 prev_subj = nouns[question.id][top_idx][rand_draw].lower()
@@ -306,7 +307,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
                 if score > confidence_threshold:
                     prev_subj[item] = answer.text.lower()
                     if verbose:
-                        print('\t->', prev_subj[item], '(', answer.score, ')')
+                        print('\t->', prev_subj[item], '(', score, ')')
                     found_candidate[item] = True
                     # If current answer is an answer candidate, submit it
                     if answer.text.lower() in question.candidates_lower:
@@ -357,6 +358,17 @@ def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshol
     return os.path.join(csv_path, csv_filename)
 
 
+def print_accuracy(correct_answers, total_count):
+    start_bold = '\033[1m'
+    end_bold = '\033[0;0m'
+    total_correct = sum(correct_answers.values())
+    if total_count != 0:
+        print(str(int(total_correct)) + '/' + str(total_count), '=',
+              start_bold + '%0.1f' % (float(total_correct)/total_count * 100)+'%' + end_bold)
+    else:
+        print()
+
+
 def print_eval_as_table(correct_answers, incorrect_answers, counts_by_type):
     start_bold = '\033[1m'
     end_bold = '\033[0;0m'
@@ -405,8 +417,8 @@ def eval_templates():
     parser.add_argument('--nocache', dest='cache', action='store_false')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
-    parser.add_argument('--conf_threshold', default=0.10, type=float,
-                        help='Confidence threshold required to use ')
+    parser.add_argument('--conf_threshold', default=None, type=float,
+                        help='Confidence threshold required to use current answer in next query.')
     parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
                         help='If True, save the QA results in a CSV file.')
     parser.add_argument('--seed', type=int, default=None,
