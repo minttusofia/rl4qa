@@ -257,6 +257,7 @@ def playground_setup():
         sp_noun_parser = SpacyNounParser()
         nltk_noun_parser = NltkNounParser()
 
+    print('Initialising {}...'.format(args.reader))
     reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
     # Playground main loop
     playground_main(dataset, search_engine, reader, nouns, noun_parser, args.verbose,

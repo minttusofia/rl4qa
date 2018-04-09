@@ -96,6 +96,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
     """
     correct_answers = collections.defaultdict(float)
     incorrect_answers = collections.defaultdict(float)
+    counts_by_type = collections.defaultdict(float)
 
     store_results = False
     if csv_path is not None:
@@ -115,10 +116,11 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         if not verbose and i % 10 == 0:
             if i != 0:
                 t = print_time_taken(t)
-            print('Evaluating question', i, '/', min(len(dataset), num_items_to_eval), end=' - ')
+            print('Evaluating question', i, '/', num_items_to_eval, end='  -  ')
             print_accuracy(correct_answers, i)
         question = Question(dataset[i % len(dataset)])
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
+        counts_by_type[query_type] += 1.0
         if type(templates) == dict:  # if templates are assigned to query types
             if query_type not in templates:
                 print('\nNo template found for', query_type, '\n')
@@ -214,7 +216,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
             for line in collected_data:
                 writer.writerow(line)
         print('Written to', csv_path)
-    return correct_answers, incorrect_answers
+    return correct_answers, incorrect_answers, counts_by_type
 
 
 def parallel_eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
@@ -223,6 +225,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
     """Accelerate evaluation by querying RC model with multiple questions in parallel."""
     correct_answers = collections.defaultdict(float)
     incorrect_answers = collections.defaultdict(float)
+    counts_by_type = collections.defaultdict(float)
     batch_size = 5
 
     for batch in range(int(math.ceil(num_items_to_eval/batch_size))):  # split data into batches
@@ -245,6 +248,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
             question = Question(dataset[batch_size * batch + item])
             query_type, subject = (question.query.split()[0],
                                    ' '.join(question.query.split()[1:]))
+            counts_by_type[query_type] += 1.0
             if verbose:
                 print(item, ':', question.query)
             query_types.append(query_type)
@@ -334,7 +338,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
                         prev_subj[item] = prev_subj[item].lower()
                     print('     random draw:', prev_subj[item])
 
-    return correct_answers, incorrect_answers
+    return correct_answers, incorrect_answers, counts_by_type
 
 
 def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold, reader,
@@ -410,7 +414,7 @@ def eval_templates():
     parser.add_argument('--wikihop_version', type=str, default='1.1',
                         help='WikiHop version to use: one of {0, 1.1}.')
     parser.add_argument('--dev', nargs='?', const=True, default=False,
-                        help='If True, build an index on dev data instead of train.')
+                        help='If True, evaluate templates on dev data instead of train.')
     parser.add_argument('--parallel', nargs='?', const=True, default=False, type=bool,
                         help='If True, evaluate multiple questions in parallel.')
     parser.add_argument('--cache', dest='cache', action='store_true')
@@ -454,6 +458,7 @@ def eval_templates():
         str_noun_parser_class = 'nltk'
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
+    print('Initialising {}...'.format(args.reader))
     reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
 
     # Maximum number of queries allowed per instance
@@ -488,10 +493,10 @@ def eval_templates():
     if args.trim_index:
         nouns, search_engine = trim_index(dataset, nouns, search_engine)
 
-    counts_by_type = collections.defaultdict(float)
+    single_pass_counts_by_type = collections.defaultdict(float)
     for item in dataset:
-        counts_by_type[item['query'].split()[0]] += 1.0
-    print('Question instances by type:', dict(counts_by_type))
+        single_pass_counts_by_type[item['query'].split()[0]] += 1.0
+    print('Question instances by type:', dict(single_pass_counts_by_type))
 
     templates = json.load(open(args.templates_from_file))
     csv_path = None
@@ -517,12 +522,12 @@ def eval_templates():
     if evaluate_nouns:
         eval_nouns(dataset, nouns)
     if parallel_eval:
-        correct_answers, incorrect_answers = (
+        correct_answers, incorrect_answers, counts_by_type = (
             parallel_eval_single_templates(templates, search_engine, dataset, nouns, reader,
                                            redis_server, num_items_to_eval, max_num_queries,
                                            confidence_threshold, penalize_long_answers, verbose))
     else:
-        correct_answers, incorrect_answers = (
+        correct_answers, incorrect_answers, counts_by_type = (
             eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
                                   num_items_to_eval, max_num_queries, confidence_threshold,
                                   csv_path, penalize_long_answers, verbose))
