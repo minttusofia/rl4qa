@@ -23,7 +23,7 @@ def to_cmd(c, dirname, run_id):
     command = 'sh ../python3.c -m rl.main --dirname {} --lr {} --gamma {} --update_freq {} ' \
               '{} {} --entropy_w {} --num_init_random_steps {} ' \
               '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
-              '--qtype all --actions all-30 --verbose 2 --seed {} ' \
+              '--qtype all --actions all-30 --verbose 0 --seed {} ' \
               '--hidden_sizes {} --reader {} ' \
               '--run_id {} --num_items_train {} --num_items_eval 500 --redis_host ' \
               'cannon.cs.ucl.ac.uk' \
@@ -46,7 +46,7 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.lr = c['lr']
     args.gamma = c['gamma']
     args.update_freq = c['update_freq']
-    args.baseline = 'mean' if c['baseline'] == 'mean' else None
+    args.baseline = 'mean' if c['baseline'] == '--baseline=mean' else None
     args.entropy_w = c['entropy_w']
     args.num_init_random_steps = c['num_init_random_steps']
 
@@ -91,15 +91,16 @@ def main(argv):
 
     default_hyperparameters = dict(
         lr=[1e-3],
-        gamma=[0.99],
+        gamma=[0.8],
         update_freq=[20],
         default_r=[0.0],
         found_candidate_r=[0.0],
-        penalty=[-1],
-        success_r=[1],
+        penalty=[-1.0],
+        success_r=[1.0],
         num_items_train=[300000],
         num_items_eval=[500],
-        hidden_sizes=[['32']]  # [['32', '32']] for multiple layers
+        hidden_sizes=[['32']],  # [['32', '32']] for multiple layers
+        num_init_random_steps=[0]
     )
 
     hyperparameters_space_1 = dict(
@@ -168,12 +169,20 @@ def main(argv):
         gamma=[0.5, 0.8],
     )
 
+    hyperparameters_space_8 = dict(
+        baseline=['--baseline=mean', ''],
+        backtrack=['--backtrack', ''],
+        entropy_w=[0., 0.001],
+        reader=['bidaf', 'fastqa'],
+    )
+    
+
     dirname = args.dirname
     run_id_base = args.run_id_base
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(hyperparameters_space_7)
+    current_experiment.update(hyperparameters_space_8)
     configurations = list(cartesian_product(current_experiment))
 
     path = './rl/logs/'
@@ -217,7 +226,9 @@ def main(argv):
 #$ -o /dev/null
 #$ -e /dev/null
 #$ -t 1-{}
-#$ -l h_vmem=16G,tmem=16G
+#$ -pe smp 2
+#$ -R y
+#$ -l h_vmem=10G,tmem=10G
 #$ -l h_rt=32:00:00
 
 cd /home/malakuij/rl4qa
