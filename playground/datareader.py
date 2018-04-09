@@ -5,7 +5,6 @@ import collections
 import json
 import os
 import random
-import sys
 
 from colors import color
 from jack import readers
@@ -211,12 +210,14 @@ def playground_setup():
     parser = argparse.ArgumentParser()
     parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
                         help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
+    parser.add_argument('--reader', default='fastqa', type=str,
+                        help='Reading comprehension model to use. One of [ fastqa | bidaf ].')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--debug_noun_extraction', nargs='?', const=True, default=False, type=bool,
-                        help='If set, evaluate the baseline on a subset of data.')
+                        help='If set, print nouns extracted by both Spacy and NLTK.')
     parser.add_argument('--subset_size', default=None, type=int,
-                        help='If set, evaluate the baseline on a subset of data.')
+                        help='If set, load only on a subset of data.')
     parser.add_argument('--k_most_common_only', type=int, default=None,
                         help='If set, only include the k most commonly occurring relation types.')
     parser.add_argument('--wikihop_version', type=str, default='1.1',
@@ -256,7 +257,7 @@ def playground_setup():
         sp_noun_parser = SpacyNounParser()
         nltk_noun_parser = NltkNounParser()
 
-    reader = readers.reader_from_file('./rc/fastqa_reader')
+    reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
     # Playground main loop
     playground_main(dataset, search_engine, reader, nouns, noun_parser, args.verbose,
                     debug_noun_extraction, sp_noun_parser, nltk_noun_parser,

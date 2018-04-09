@@ -119,7 +119,11 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         question = Question(dataset[i % len(dataset)])
         query_type, subject = question.query.split()[0], ' '.join(question.query.split()[1:])
         if type(templates) == dict:  # if templates are assigned to query types
-            template = templates[query_type]
+            if query_type not in templates:
+                print('\nNo template found for', query_type, '\n')
+                template = templates['default']
+            else:
+                template = templates[query_type]
         else:
             rand_draw = randint(0, len(templates)-1)
             template = templates[rand_draw]
@@ -195,7 +199,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
             collected_data_row.extend([int(found_correct), len(incorrect_answers_this_episode)])
             collected_data.append(collected_data_row)
 
-            if (i + 1) % 100 == 0:
+            if (i + 1) % 10 == 0:
                 with open(csv_path, 'a') as f:
                     writer = csv.writer(f)
                     for line in collected_data:
@@ -203,6 +207,12 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                 print('Written to', csv_path)
                 collected_data = []
 
+    if store_results:
+        with open(csv_path, 'a') as f:
+            writer = csv.writer(f)
+            for line in collected_data:
+                writer.writerow(line)
+        print('Written to', csv_path)
     return correct_answers, incorrect_answers
 
 
@@ -326,7 +336,7 @@ def parallel_eval_single_templates(templates, search_engine, dataset, nouns, rea
     return correct_answers, incorrect_answers
 
 
-def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold,
+def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold, reader,
                     str_noun_parser_class, templates_from_file, qtypes_from_file):
     csv_path = 'baselines/data'
 
@@ -338,6 +348,7 @@ def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshol
                     + '__' + str(len_dataset)
                     + '_' + str(max_num_queries)
                     + '_' + str(confidence_threshold)
+                    + '_' + reader
                     + '_' + str_noun_parser_class
                     + '_' + templates_from_file[:-5].split('baselines/')[-1]  # keep templates
                                                                               # filename
@@ -373,6 +384,8 @@ def eval_templates():
     parser = argparse.ArgumentParser()
     parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
                         help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
+    parser.add_argument('--reader', default='fastqa', type=str,
+                        help='Reading comprehension model to use. One of [ fastqa | bidaf ].')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--subset_size', default=None, type=int,
@@ -405,7 +418,7 @@ def eval_templates():
     parser.set_defaults(cache=True, trim_index=True)
     args = parser.parse_args()
 
-    subset_id, data_path, index_filename, nouns_path = format_paths(args)
+    subset_id, data_path, index_filename, nouns_path = format_paths(args, args.dev)
 
     redis_server = None
     if args.cache:
@@ -429,7 +442,7 @@ def eval_templates():
         str_noun_parser_class = 'nltk'
     # Load noun phrases from a local file (for speedup) if it exists, or create a new one if not
     nouns = pre_extract_nouns(dataset, nouns_path, noun_parser_class=noun_parser_class)
-    reader = readers.reader_from_file('./rc/fastqa_reader')
+    reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
 
     # Maximum number of queries allowed per instance
     max_num_queries = 25
@@ -437,7 +450,7 @@ def eval_templates():
     confidence_threshold = args.conf_threshold
     # Whether to penalise answer length
     penalize_long_answers = False
-    if args.seed is not None
+    if args.seed is not None:
         # Make experiments repeatable
         random.seed(args.seed)
 
@@ -472,7 +485,7 @@ def eval_templates():
     csv_path = None
     if args.store_results:
         csv_path = format_csv_path(data_path, len(dataset), max_num_queries, args.conf_threshold,
-                                   str_noun_parser_class, args.templates_from_file,
+                                   args.reader, str_noun_parser_class, args.templates_from_file,
                                    args.qtypes_from_file)
         print('Collecting data to', csv_path)
         if os.path.exists(csv_path):
