@@ -58,6 +58,7 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.seed = c['seed']
     args.h_sizes = c['hidden_sizes']
     args.reader = c['reader']
+    args.conf_threshold = None
     args.max_queries = 25
     args.run_id = run_id
 
