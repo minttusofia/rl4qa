@@ -144,7 +144,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         for _ in range(max_num_queries):
             top_doc_found = False
             while not top_doc_found:
-                query = form_query(template, prev_subj, question_marks)
+                query = form_query(template, prev_subj, add_question_mark=question_marks)
                 top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
                 # Iterate over ranking backwards (last document is best match)
                 for d in range(len(top_idxs)-1, -1, -1):

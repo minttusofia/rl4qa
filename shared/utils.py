@@ -55,7 +55,7 @@ def trim_index(dataset, nouns, search_engine, keep_most=False):
     return nouns, search_engine
 
 
-def form_query(template, subject, add_question_mark=True, fg_color=None):
+def form_query(template, subject, fg_color=None, add_question_mark=True):
     """Turn query template - subject pairs into strings."""
     if type(template) == str:
         query = template + ' ' + subject
