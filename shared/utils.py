@@ -55,27 +55,29 @@ def trim_index(dataset, nouns, search_engine, keep_most=False):
     return nouns, search_engine
 
 
-def form_query(template, subject, fg_color=None):
+def form_query(template, subject, add_question_mark=True, fg_color=None):
     """Turn query template - subject pairs into strings."""
     if type(template) == str:
-        query = template + ' ' + subject + '?'
+        query = template + ' ' + subject
         if fg_color is not None:
-           query = color(template, fg=fg_color) + ' ' + subject + '?'
+           query = color(template, fg=fg_color) + ' ' + subject
     elif len(template) > 1:  # Two-part templates expect subject to appear in the middle
         if template[1][0] == '\'':  # template contains [x]'s
-            query = template[0] + ' ' + subject + template[1] + '?'
+            query = template[0] + ' ' + subject + template[1]
             if fg_color is not None:
                 query = (color(template[0], fg=fg_color) + ' ' + subject
-                         + color(template[1], fg=fg_color) + '?')
+                         + color(template[1], fg=fg_color))
         else:
-            query = template[0] + ' ' + subject + ' ' + template[1] + '?'
+            query = template[0] + ' ' + subject + ' ' + template[1]
             if fg_color is not None:
                 query = (color(template[0], fg=fg_color) + ' ' + subject + ' '
-                         + color(template[1], fg=fg_color) + '?')
+                         + color(template[1], fg=fg_color))
     else:
-        query = template[0] + ' ' + subject + '?'
+        query = template[0] + ' ' + subject
         if fg_color is not None:
-            query = color(template[0], fg=fg_color) + ' ' + subject + '?'
+            query = color(template[0], fg=fg_color) + ' ' + subject
+    if add_question_mark:
+        query += '?'
     return query
 
 
