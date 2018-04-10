@@ -1,6 +1,7 @@
 import io
 import json
 import numpy as np
+import operator
 import os
 import unicodecsv
 
@@ -74,7 +75,6 @@ class GloveLookup:
         self.word2idx, self.lookup = embeddings.glove.load_glove(open(path, 'rb'))
         use_existing_oov_embs = oov_from_file is not None and os.path.exists(oov_from_file)
         num_glove_words = len(self.word2idx)
-        self.initialised_oov_words = {}
         if use_existing_oov_embs:
             initialised_oov = json.load(io.open(oov_from_file, 'r', encoding='utf8'))
             self.oov_words = set(initialised_oov.keys())
@@ -96,7 +96,7 @@ class GloveLookup:
         if not use_existing_oov_embs:
             with io.open(oov_from_file, 'w', encoding='utf8') as f:
                 json.dump(oov_embs, f, ensure_ascii=False)
-        for word in self.initialised_oov_words:
+        for word in self.oov_words:
             # Override idf dictionary default log(N/n_t)
             self.idf[word] = self.rand_init_idf
 
@@ -127,6 +127,12 @@ class GloveLookup:
             for s in self.state_str_history:
                 f.write(str(s) + '\n')
 
+    def lookup_idf(self, word):
+        if word.lower() in self.word2idx:
+            return self.idf[word.lower()]
+        else:
+            return self.oov_idf
+
     def lookup_word_idf(self, word):
         if word.lower() in self.word2idx:
             return self.lookup[self.word2idx[word.lower()]] * self.idf[word.lower()]
@@ -138,24 +144,39 @@ class GloveLookup:
             return self.lookup[self.word2idx[word.lower()]]
         return self.oov
 
-    def lookup_doc_tf_idf(self, doc, tf):
+    def lookup_doc_tf_idf(self, doc, verbose=False):
         if doc is None:
             return np.zeros(self.emb_dim)
         words = doc.split()
-        return np.mean([tf[w.lower()] * self.lookup_word_idf(w) for w in words], axis=0)
+        if verbose:
+            tf = defaultdict(int)
+            for word in words:
+                tf[word.lower()] += 1
+            seen_words = set()
+            unique_words = [w for w in words if not (w in seen_words or seen_words.add(w))]
+            idfs = [self.lookup_idf(word) for word in unique_words]
+            total_idf = sum(idfs)
+            word_to_percentage = dict([(unique_words[w],
+                                        tf[unique_words[w].lower()] * idfs[w] / total_idf)
+                                       for w in range(len(unique_words))])
+            # Highest weighted words per document
+            print(sorted(word_to_percentage.items(), key=operator.itemgetter(1), reverse=True)[:10],
+                  '\n')
+            for word in unique_words:
+                if word.lower() in self.word2idx:
+                    print(word, tf[word], self.idf[word.lower()])
+                    print('\t', self.lookup[self.word2idx[word.lower()]][:10])
+                else:
+                    print(word, tf[word.lower()], self.oov_idf)
+                    print('\t', self.oov[:10])
+        return np.mean([self.lookup_word_idf(w) for w in words], axis=0)
 
     def lookup_doc_avg(self, doc):
         words = doc.split()
         return np.mean([self.lookup_word(w) for w in words], axis=0)
 
-    def embed_state(self, s, store_naive=False):
-        tfs = []
-        for elem in s:
-            tfs.append(defaultdict(int))
-            if elem is not None:
-                for word in elem.split():
-                    tfs[-1][word.lower()] += 1
-        emb_elements = [self.lookup_doc_tf_idf(s[e], tfs[e]) for e in range(len(s))]
+    def embed_state(self, s, store_naive=False, store_tf_idf=False, verbose=True):
+        emb_elements = [self.lookup_doc_tf_idf(s[e], verbose) for e in range(len(s))]
         if np.any([type(component) == np.float64 or len(component) != self.emb_dim
                    for component in emb_elements]):
             print('State element has incorrect format:\n', s, '\n', emb_elements)
@@ -164,8 +185,9 @@ class GloveLookup:
             naive_state = np.stack([self.lookup_doc_avg(elem) for elem in s], axis=0).flatten()
             self.avg_state_history.append(list(naive_state))
             self.avg_state_history = self.avg_state_history[-self.history_len:]
-        self.state_history.append(list(tf_idf_state))
-        self.state_history = self.state_history[-self.history_len:]
-        self.state_str_history.append(s)
-        self.state_str_history = self.state_str_history[-self.history_len:]
+        if store_tf_idf:
+            self.state_history.append(list(tf_idf_state))
+            self.state_history = self.state_history[-self.history_len:]
+            self.state_str_history.append(s)
+            self.state_str_history = self.state_str_history[-self.history_len:]
         return tf_idf_state
