@@ -143,6 +143,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         seen_incorrect_answer_this_episode = False
         for _ in range(max_num_queries):
             top_doc_found = False
+            nouns_tried = set()
             while not top_doc_found:
                 query = form_query(template, prev_subj, add_question_mark=question_marks)
                 top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
@@ -156,10 +157,29 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                 # If question has been asked from all documents, pick a new subject from top doc at
                 # random
                 if not top_doc_found:
+                    if verbose:
+                        print(query, 'has been asked from all docs')
                     top_idx = top_idxs[-1]
                     prev_subj = (nouns[question.id]
                                       [top_idx]
                                       [randint(0, len(nouns[question.id][top_idx])-1)])
+                    # If all nouns from current doc have been asked from all docs, pick another doc
+                    if len(nouns_tried) >= len(nouns[question.id][top_idx]):
+                        prev_top_idx = top_idx
+                        docs = list(range(len(question.supports)))
+                        docs.pop(top_idx)
+                        # Pick different document at random
+                        top_idx = docs[randint(0, len(docs)-1)]
+                        if verbose:
+                            print('tried all nouns from document', prev_top_idx,
+                                  'continuing from doc', top_idx)
+                        # Pick new subject at random
+                        prev_subj = (nouns[question.id]
+                                     [top_idx]
+                                     [randint(0, len(nouns[question.id][top_idx])-1)])
+
+                        nouns_tried = set()
+                    nouns_tried.add(prev_subj)
             queries_asked[query].append(top_idx)
             if verbose:
                 print(query, '\n\t->', top_idx)
