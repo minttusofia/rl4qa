@@ -41,7 +41,7 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.random_agent = False
     args.num_items_train = c['num_items_train']
     args.num_items_eval = c['num_items_eval']
-    args.num_items_final_eval = None
+    args.num_items_final_eval = 5127
 
     args.lr = c['lr']
     args.gamma = c['gamma']
@@ -177,7 +177,15 @@ def main(argv):
         reader=['bidaf', 'fastqa'],
     )
     
-
+    hyperparameters_space_9 = dict(
+        baseline=['--baseline=mean'],
+        backtrack=['--backtrack'],
+        reader=['fastqa', 'bidaf'],
+        num_init_random_steps=[0, 1000],
+        entropy_w=[0.001],
+        gamma=[0.5, 0.8],
+        hidden_sizes=['32 32 32', '64 64']
+    )
     dirname = args.dirname
     run_id_base = args.run_id_base
 
@@ -230,7 +238,7 @@ def main(argv):
 #$ -pe smp 2
 #$ -R y
 #$ -l h_vmem=10G,tmem=10G
-#$ -l h_rt=32:00:00
+#$ -l h_rt=72:00:00
 
 cd /home/malakuij/rl4qa
 
