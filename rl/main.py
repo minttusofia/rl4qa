@@ -214,7 +214,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         s0 = [subj0, None, None, None, subj0]
         if types_in_state:
             s0.append(q_type.replace('_', ' '))
-        s0 = embs.embed_state(s0)
+        s0 = embs.embed_state(s0, verbose=args.verbose_embs)
         state_history = [s0]  # used for backtracking
         subj_history = [subj0]
 
@@ -273,7 +273,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                     actions[a_t], subj_prev, search_engine, question, nouns, queries_asked,
                     verbose)
                 if top_idx is None:  # subject has been reset
-                    s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev])
+                    s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev],
+                                                                       verbose=args.verbose_embs)
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
@@ -303,7 +304,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             s_t = [subj0, ' '.join(actions[a_t]), subj_prev, d_t, subj_t]
             if types_in_state:
                 s_t.append(q_type.replace('_', ' '))
-            s_t = embs.embed_state(s_t)
+            s_t = embs.embed_state(s_t, verbose=args.verbose_embs)
             state_history.append(s_t)
             subj_history.append(subj_t)
             subj_prev = subj_t
@@ -452,6 +453,8 @@ def parse_args():
                         help='If True, print out all mentions of the query subject.')
     parser.add_argument('--verbose_weights', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out model weights when saving or loading.')
+    parser.add_argument('--verbose_embs', nargs='?', const=True, default=False, type=bool,
+                        help='If True, print out word and state embeddings.')
 
     parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')

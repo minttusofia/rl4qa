@@ -91,7 +91,8 @@ def eval_nouns(dataset, nouns):
 
 def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                           redis_server, num_items_to_eval, max_num_queries, confidence_threshold,
-                          csv_path=None, penalize_long_answers=False, verbose=False):
+                          question_marks, csv_path=None, penalize_long_answers=False,
+                          verbose=False):
     """Evaluates fixed-structure templates which vary in time by the noun passed in as the object.
     """
     correct_answers = collections.defaultdict(float)
@@ -142,8 +143,9 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
         seen_incorrect_answer_this_episode = False
         for _ in range(max_num_queries):
             top_doc_found = False
+            nouns_tried = set()
             while not top_doc_found:
-                query = form_query(template, prev_subj)
+                query = form_query(template, prev_subj, add_question_mark=question_marks)
                 top_idxs = search_engine.rank_docs(question.id, query, topk=len(question.supports))
                 # Iterate over ranking backwards (last document is best match)
                 for d in range(len(top_idxs)-1, -1, -1):
@@ -155,10 +157,29 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                 # If question has been asked from all documents, pick a new subject from top doc at
                 # random
                 if not top_doc_found:
+                    if verbose:
+                        print(query, 'has been asked from all docs')
                     top_idx = top_idxs[-1]
                     prev_subj = (nouns[question.id]
                                       [top_idx]
                                       [randint(0, len(nouns[question.id][top_idx])-1)])
+                    # If all nouns from current doc have been asked from all docs, pick another doc
+                    if len(nouns_tried) >= len(nouns[question.id][top_idx]):
+                        prev_top_idx = top_idx
+                        docs = list(range(len(question.supports)))
+                        docs.pop(top_idx)
+                        # Pick different document at random
+                        top_idx = docs[randint(0, len(docs)-1)]
+                        if verbose:
+                            print('tried all nouns from document', prev_top_idx,
+                                  'continuing from doc', top_idx)
+                        # Pick new subject at random
+                        prev_subj = (nouns[question.id]
+                                     [top_idx]
+                                     [randint(0, len(nouns[question.id][top_idx])-1)])
+
+                        nouns_tried = set()
+                    nouns_tried.add(prev_subj)
             queries_asked[query].append(top_idx)
             if verbose:
                 print(query, '\n\t->', top_idx)
@@ -423,6 +444,8 @@ def eval_templates():
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
     parser.add_argument('--conf_threshold', default=None, type=float,
                         help='Confidence threshold required to use current answer in next query.')
+    parser.add_argument('--no_question_marks', dest='question_marks', action='store_false',
+                        help='If True, append question marks to questions asked to reader.')
     parser.add_argument('--store_results', nargs='?', const=True, default=False, type=bool,
                         help='If True, save the QA results in a CSV file.')
     parser.add_argument('--seed', type=int, default=None,
@@ -431,7 +454,7 @@ def eval_templates():
                         help='If set, use only qtypes from the specified json file.')
     parser.add_argument('--templates_from_file', default='baselines/template_list_70.json',
                         type=str, help='File from which to read question templates.')
-    parser.set_defaults(cache=True, trim_index=True)
+    parser.set_defaults(cache=True, trim_index=True, question_marks=True)
     args = parser.parse_args()
 
     subset_id, data_path, index_filename, nouns_path = format_paths(args, args.dev)
@@ -530,7 +553,7 @@ def eval_templates():
         correct_answers, incorrect_answers, counts_by_type = (
             eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
                                   num_items_to_eval, max_num_queries, confidence_threshold,
-                                  csv_path, penalize_long_answers, verbose))
+                                  args.question_marks, csv_path, penalize_long_answers, verbose))
 
     print('Correct guesses', dict(correct_answers))
     print('Incorrect guesses', dict(incorrect_answers))
