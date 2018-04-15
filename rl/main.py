@@ -4,6 +4,7 @@ import numpy as np
 import os
 import random
 import redis
+import sys
 import tensorflow as tf
 
 from collections import defaultdict
@@ -425,6 +426,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(e, ': accuracy ({}):'.format(horizon if horizon is not None else 'all'),
                   start_bold + '%0.1f' % (accuracy_from_history(corrects, e, horizon) * 100)+'%'
                   + end_bold)
+        sys.stdout.flush()
+        sys.stderr.flush()
+
     # Calculate total dev accuracy
     if args.run_id is not None and total_accuracy_only:
         write_summary(summary_writer, outer_e,
@@ -656,6 +660,9 @@ def main():
     set_random_seed(args.seed)
     dataset, search_engine, nouns, reader, redis_server = initialise(args)
 
+    sys.stdout.flush()
+    sys.stderr.flush()
+
     interm_eval_dataset, eval_search_engine, eval_nouns = None, None, None
     if args.eval:
         # Evaluate on dev data
@@ -672,6 +679,8 @@ def main():
         run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                   eval_dataset=interm_eval_dataset, eval_search_engine=eval_search_engine,
                   eval_nouns=eval_nouns)
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     if args.eval:
         run_id = format_run_id(args)
@@ -690,6 +699,8 @@ def main():
         set_random_seed(args.seed)
         run_agent(eval_dataset[:args.num_items_final_eval], eval_search_engine, eval_nouns, reader,
                   redis_server, embs, args, agent_from_checkpoint=checkpoint_path, dev=True)
+    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 if __name__ == "__main__":
