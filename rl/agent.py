@@ -12,7 +12,6 @@ class RandomAgent(Agent):
     def __init__(self, state_shape, action_shape):
         super(RandomAgent, self).__init__(state_shape)
         self.output = [tf.constant(np.ones(action_shape)/action_shape)]
-        self.chosen_action = tf.random_uniform([], maxval=action_shape, dtype=tf.int32)
 
 
 class Reinforce(Agent):
@@ -32,16 +31,20 @@ class Reinforce(Agent):
                                                               biases_initializer=None)
         # To avoid arithmetic overflow
         output = self.softmax_output + 1e-15
-        self.output = output/tf.reduce_sum(output)
-        self.chosen_action = tf.argmax(self.output, 1)
+        # Renormalise per timestep
+        # [timestep, action]/[timestep, 1]
+        self.output = output/tf.reshape(tf.reduce_sum(output, axis=1), [-1, 1])
 
         # Training
         self.reward_holder = tf.placeholder(shape=[None], dtype=tf.float32)
         self.action_holder = tf.placeholder(shape=[None], dtype=tf.int32)
 
         self.entropy = -tf.reduce_sum(self.output * tf.log(self.output))
-        self.indexes = (tf.range(0, tf.shape(self.output)[0])
-                        * tf.shape(self.output)[1] + self.action_holder)
+
+        # Indexes point to probabilities of actions taken:
+        # timestep * num_actions + a_t for each timestep in episode
+        self.indexes = (tf.range(0, tf.shape(self.output)[0]) * tf.shape(self.output)[1]
+                        + self.action_holder)
         self.responsible_outputs = tf.gather(tf.reshape(self.output, [-1]), self.indexes)
 
         self.pg_loss = -tf.reduce_mean(tf.log(self.responsible_outputs) * self.reward_holder)

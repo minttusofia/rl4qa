@@ -6,12 +6,12 @@ from colors import color
 from random import randint
 
 
-def verbose_print(verbosity, verbose_level, *args):
+def verbose_print(verbosity, verbose_level, *args, end='\n'):
     """Print *args if current verbosity level surpasses required verbosity of print statement."""
     if verbose_level >= verbosity:
         for arg in args:
             print(arg, end=' ')
-        print()
+        print(end, end='')
 
 
 def trim_index(dataset, nouns, search_engine, keep_most=False):
