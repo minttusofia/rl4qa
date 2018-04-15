@@ -425,6 +425,7 @@ def eval_templates():
                         help='Reading comprehension model to use. One of [ fastqa | bidaf ].')
     parser.add_argument('--verbose', nargs='?', const=True, default=False, type=bool,
                         help='If True, print out all mentions of the query subject.')
+
     parser.add_argument('--subset_size', default=None, type=int,
                         help='If set, evaluate the baseline on a subset of data.')
     parser.add_argument('--num_items_to_eval', default=None, type=int,
@@ -438,10 +439,14 @@ def eval_templates():
                         help='If True, evaluate templates on dev data instead of train.')
     parser.add_argument('--parallel', nargs='?', const=True, default=False, type=bool,
                         help='If True, evaluate multiple questions in parallel.')
+
+    parser.add_argument('--redis_host', type=str, default='localhost',
+                        help='Host of running redis instance (e.g. localhost, cannon).')
     parser.add_argument('--cache', dest='cache', action='store_true')
     parser.add_argument('--nocache', dest='cache', action='store_false')
     parser.add_argument('--trim', dest='trim_index', action='store_true')
     parser.add_argument('--notrim', dest='trim_index', action='store_false')
+
     parser.add_argument('--conf_threshold', default=None, type=float,
                         help='Confidence threshold required to use current answer in next query.')
     parser.add_argument('--no_question_marks', dest='question_marks', action='store_false',
