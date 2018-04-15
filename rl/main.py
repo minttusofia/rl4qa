@@ -275,6 +275,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 if top_idx is None:  # subject has been reset
                     s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev],
                                                                        verbose=args.verbose_embs)
+            verbose_print(3, args.verbose, '   0.4f' % (a_distr[0, a_t]), end='')
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
@@ -335,12 +336,17 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 baseline_reward = sess.run(baseline_r)
                 ep_history[-1, 2] -= baseline_reward
                 sess.run(update_baseline, {current_e: e + 1., new_reward: ep_history[-1, 2]})
+            verbose_print(3, verbose, 'ep history before discounting', ep_history[:, 2])
             ep_history[:, 2] = discount_rewards(ep_history[:, 2], args.gamma)
+            verbose_print(3, verbose, 'ep history after discounting', ep_history[:, 2])
             feed_dict = {agent.reward_holder: ep_history[:, 2],
                          agent.action_holder: ep_history[:, 1],
                          agent.state_in: np.vstack(ep_history[:, 0])}
-            grads, pg_loss, ent_loss = sess.run([agent.gradients, agent.pg_loss, agent.ent_loss],
-                                                feed_dict)
+            grads, pg_loss, ent_loss, output, indexes, responsible_outputs = sess.run(
+                [agent.gradients, agent.pg_loss, agent.ent_loss, agent.output, agent.indexes,
+                 agent.responsible_outputs],
+                feed_dict)
+            verbose_print(2, verbose, 'Probs of actions taken', responsible_outputs)
             verbose_print(2, verbose,
                           'PG Loss {}; Ent Loss {}; total {}'.format(pg_loss, ent_loss,
                                                                      pg_loss + ent_loss))
@@ -348,6 +354,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 verbose_print(2, verbose,
                               'Raw {}; B {}; effective {}'.format(raw_reward, baseline_reward,
                                                                   raw_reward - baseline_reward))
+            verbose_print(3, args.verbose, 'Outputs', output, '\nindexes', indexes)
             for idx, grad in enumerate(grads):
                 gradBuffer[idx] += grad
 
@@ -411,6 +418,13 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(e, ': Saving model to', checkpoint_to_write)
             saver.save(sess, checkpoint_to_write)
 
+        if e % 100 == 0:  # Log running accuracy
+            start_bold = '\033[1m'
+            end_bold = '\033[0;0m'
+            horizon = None
+            print(e, ': accuracy ({}):'.format(horizon if horizon is not None else 'all'),
+                  start_bold + '%0.1f' % (accuracy_from_history(corrects, e, horizon) * 100)+'%'
+                  + end_bold)
     # Calculate total dev accuracy
     if args.run_id is not None and total_accuracy_only:
         write_summary(summary_writer, outer_e,
