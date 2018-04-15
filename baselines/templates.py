@@ -461,7 +461,10 @@ def eval_templates():
 
     redis_server = None
     if args.cache:
-        redis_server = redis.StrictRedis(host='localhost', port=6379, db=0)
+        if args.reader == 'fastqa':
+            redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=0)
+        elif args.reader == 'bidaf':
+            redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=1)
     parallel_eval = args.parallel
 
     print('Initialising...')

@@ -513,11 +513,11 @@ def parse_args():
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')
-    parser.add_argument('--gamma', default=0.99, type=float,
+    parser.add_argument('--gamma', default=0.8, type=float,
                         help='Discount factor for rewards.')
     parser.add_argument('--lr', default=0.001, type=float,
                         help='Learning Rate')
-    parser.add_argument('--update_freq', default=50, type=int,
+    parser.add_argument('--update_freq', default=20, type=int,
                         help='The number of time steps between training steps.')
     parser.add_argument('--max_queries', default=25, type=int,
                         help='Maximum number of queries to allow per episode.')
