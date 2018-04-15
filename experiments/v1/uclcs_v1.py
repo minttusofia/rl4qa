@@ -101,7 +101,8 @@ def main(argv):
         num_items_train=[300000],
         num_items_eval=[500],
         hidden_sizes=[['32']],  # [['32', '32']] for multiple layers
-        num_init_random_steps=[0]
+        num_init_random_steps=[0],
+        entropy_w=[0.001]
     )
 
     hyperparameters_space_1 = dict(
@@ -149,7 +150,7 @@ def main(argv):
         num_init_random_steps=[1000],
         entropy_w=[0.001],
         gamma=[0.5, 0.8],
-        hidden_sizes=['32 32 32', '64 64']
+        hidden_sizes=[['32', '32', '32'], ['64', '64']]
     )
 
     hyperparameters_space_7 = dict(
@@ -181,17 +182,15 @@ def main(argv):
         baseline=['--baseline=mean'],
         backtrack=['--backtrack'],
         reader=['fastqa', 'bidaf'],
-        num_init_random_steps=[0, 1000],
-        entropy_w=[0.001],
-        gamma=[0.5, 0.8],
-        hidden_sizes=['32 32 32', '64 64']
+        gamma=[0.1, 0.3, 0.5],
+        hidden_sizes=[['32'], ['32', '32']]
     )
     dirname = args.dirname
     run_id_base = args.run_id_base
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(hyperparameters_space_8)
+    current_experiment.update(hyperparameters_space_9)
     configurations = list(cartesian_product(current_experiment))
 
     path = './rl/logs/'
@@ -238,7 +237,7 @@ def main(argv):
 #$ -pe smp 2
 #$ -R y
 #$ -l h_vmem=10G,tmem=10G
-#$ -l h_rt=72:00:00
+#$ -l h_rt=120:00:00
 
 cd /home/malakuij/rl4qa
 
