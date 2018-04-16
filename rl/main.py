@@ -222,12 +222,14 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if args.run_id is not None:
         summary_writer = (tf.summary.FileWriter(summaries_path, sess.graph)
                           if summary_writer is None else summary_writer)
-        if not args.random_agent:  # no variables to save/retrieve for random agent
-            if agent_from_checkpoint is not None:
-                print('Loading saved agent from', agent_from_checkpoint)
-                saver.restore(sess, agent_from_checkpoint)
-            else:
-                print('Initialised agent weights')
+    if not args.random_agent:  # no variables to save/retrieve for random agent
+        if agent_from_checkpoint is not None:
+            print('Before loading saved weights:')
+            verbose_print_model_weights(sess, args)
+            print('Loading saved agent from', agent_from_checkpoint)
+            saver.restore(sess, agent_from_checkpoint)
+        else:
+            print('Initialised agent weights')
     verbose_print_model_weights(sess, args)
 
     reward_history = []
