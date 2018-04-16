@@ -127,7 +127,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         num_episodes = args.num_items_train
 
     # Only used when eval_dataset is not None
-    eval_freq = 4000
+    eval_freq = 40#00
+    full_eval_freq = 50#000
     checkpoint_freq = 500
     emb_dim = 50
     conf_threshold = None  # args.conf_threshold if args.reader == 'fastqa' else None
@@ -169,7 +170,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         else:
             agent = Reinforce(args.lr, s_size, a_size, args.h_sizes, args.entropy_w)
     if not args.random_agent:
-        saver = tf.train.Saver()
+        saver = tf.train.Saver(keep_checkpoint_every_n_hours=2)
 
     corrects, incorrects, incorrect_answers_this_episode = [], [], []
 
@@ -408,6 +409,20 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
 
                 checkpoint_to_load = checkpoint_to_write
             print(e, ': Running intermediate evaluation step')
+            run_agent(eval_dataset[:args.num_items_eval], eval_search_engine, eval_nouns, reader,
+                      redis_server, embs, args, agent=agent,
+                      agent_from_checkpoint=checkpoint_to_load, dev=True, existing_session=sess,
+                      total_accuracy_only=True, outer_e=e, summary_writer=summary_writer)
+        # Save to checkpoint and evaluate accuracy on full dev set
+        if eval_dataset is not None and e % full_eval_freq == 0 and args.run_id is not None:
+            checkpoint_to_load = None  # Use None as checkpoint when evaluating random agent
+            if not args.random_agent:
+                checkpoint_to_write = checkpoint_path + '{}.ckpt'.format(e)
+                print(e, ': Saving model to', checkpoint_to_write)
+                saver.save(sess, checkpoint_to_write)
+
+                checkpoint_to_load = checkpoint_to_write
+            print(e, ': Running intermediate full evaluation step')
             run_agent(eval_dataset, eval_search_engine, eval_nouns, reader, redis_server, embs,
                       args, agent=agent, agent_from_checkpoint=checkpoint_to_load, dev=True,
                       existing_session=sess, total_accuracy_only=True, outer_e=e,
@@ -664,11 +679,10 @@ def main():
     sys.stderr.flush()
 
     interm_eval_dataset, eval_search_engine, eval_nouns = None, None, None
+    eval_dataset, eval_search_engine, eval_nouns = None, None, None
     if args.eval:
         # Evaluate on dev data
         eval_dataset, eval_search_engine, eval_nouns = initialise(args, dev=True)
-        if args.num_items_eval is not None and args.num_items_eval > 0:
-            interm_eval_dataset = eval_dataset[:args.num_items_eval]
 
     emb_dim = 50
     # Initialise with train set
@@ -677,7 +691,7 @@ def main():
     if args.model_from_checkpoint is None:
         # Train agent
         run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
-                  eval_dataset=interm_eval_dataset, eval_search_engine=eval_search_engine,
+                  eval_dataset=eval_dataset, eval_search_engine=eval_search_engine,
                   eval_nouns=eval_nouns)
     sys.stdout.flush()
     sys.stderr.flush()
