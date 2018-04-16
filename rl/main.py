@@ -59,6 +59,28 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
     return reward, incorrect_answers_this_episode, corrects, incorrects
 
 
+def embed_state(args, embs, subj0=None, a_t=None, subj_prev=None, d_t=None, subj_t=None,
+                qtype=None, initial_state=False):
+    """Construct state according to in_state flags and embed with GloVe."""
+    s = []
+    if args.subj0_in_state:
+        s.append(subj0)
+
+    prev_elems = [a_t, subj_prev, d_t]
+    prev_elems_included = [args.a_t_in_state, args.subj_prev_in_state, args.d_t_in_state]
+    for elem in range(len(prev_elems)):
+        if prev_elems_included[elem]:
+            if type(prev_elems[elem]) == list:
+                prev_elems[elem] = ' '.join(prev_elems[elem])
+            s.append(None if initial_state else prev_elems[elem])
+
+    if args.subj_t_in_state:
+        s.append(subj0 if initial_state else subj_t)
+    if args.qtype_in_state:
+        s.append(qtype.replace('_', ' '))
+    return embs.embed_state(s, verbose=args.verbose_embs)
+
+
 def verbose_print_model_weights(sess, args):
     if args.verbose_weights and not args.random_agent:
         all_vars = tf.get_collection(tf.GraphKeys.MODEL_VARIABLES)
@@ -127,8 +149,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         num_episodes = args.num_items_train
 
     # Only used when eval_dataset is not None
-    eval_freq = 40#00
-    full_eval_freq = 50#000
+    eval_freq = 4000
+    full_eval_freq = 50000
     checkpoint_freq = 500
     emb_dim = 50
     conf_threshold = None  # args.conf_threshold if args.reader == 'fastqa' else None
@@ -155,10 +177,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         update_baseline = tf.assign(baseline_r,
                                     (new_reward + (current_e - 1) * baseline_r)/current_e)
 
-    num_state_parts = 5
-    types_in_state = args.qtype == 'all' or len(args.qtype.split(',')) > 1
-    if types_in_state:
-        num_state_parts += 1
+    num_state_parts = sum([args.subj0_in_state, args.a_t_in_state, args.subj_prev_in_state,
+                           args.d_t_in_state, args.subj_t_in_state, args.qtype_in_state])
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
     #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim, TODO
     s_size = num_state_parts * emb_dim
@@ -213,10 +233,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(question.id, 'has no question subject')
             continue
         # First action taken with partial information: no a_t-1, subj_t-1, d_t-1
-        s0 = [subj0, None, None, None, subj0]
-        if types_in_state:
-            s0.append(q_type.replace('_', ' '))
-        s0 = embs.embed_state(s0, verbose=args.verbose_embs)
+        s0 = embed_state(args, embs, subj0=subj0, qtype=q_type, initial_state=True)
         state_history = [s0]  # used for backtracking
         subj_history = [subj0]
 
@@ -303,11 +320,7 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                              incorrects, t == max_queries - 1, args.default_r,
                              args.found_candidate_r, args.penalty, args.success_r, verbose))
 
-            # alternative: form_query(actions[a_t], subj_t)
-            s_t = [subj0, ' '.join(actions[a_t]), subj_prev, d_t, subj_t]
-            if types_in_state:
-                s_t.append(q_type.replace('_', ' '))
-            s_t = embs.embed_state(s_t, verbose=args.verbose_embs)
+            s_t = embed_state(args, embs, subj0, actions[a_t], subj_prev, d_t, subj_t, q_type)
             state_history.append(s_t)
             subj_history.append(subj_t)
             subj_prev = subj_t
@@ -530,6 +543,19 @@ def parse_args():
                         help='Number of actions to take uniformly at random before using learned '
                              'policy.')
 
+    parser.add_argument('--no_qtype_in_s', dest='qtype_in_state', action='store_false',
+                        help='If True (default), include WikiHop relation type in RL input state.')
+    parser.add_argument('--no_subj0_in_s', dest='subj0_in_state', action='store_false',
+                        help='If True (default), include WikiHop query subject in RL input state.')
+    parser.add_argument('--no_a_t_in_s', dest='a_t_in_state', action='store_false',
+                        help='If True (default), include previous action in RL input state.')
+    parser.add_argument('--no_subj_prev_in_s', dest='subj_prev_in_state', action='store_false',
+                        help='If True (default), include previous subject in RL input state.')
+    parser.add_argument('--no_d_t_in_s', dest='d_t_in_state', action='store_false',
+                        help='If True (default), include previous document in RL input state.')
+    parser.add_argument('--no_subj_t_in_s', dest='subj_t_in_state', action='store_false',
+                        help='If True (default), include next subject in RL input state.')
+
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')
     parser.add_argument('--gamma', default=0.8, type=float,
@@ -649,6 +675,8 @@ def initialise(args, dev=False):
             return dataset, search_engine, nouns
 
     print('Initialising {}...'.format(args.reader))
+    sys.stdout.flush()
+    sys.stderr.flush()
     reader = readers.reader_from_file('./rc/{}_reader'.format(args.reader))
 
     redis_server = None
@@ -678,7 +706,6 @@ def main():
     sys.stdout.flush()
     sys.stderr.flush()
 
-    interm_eval_dataset, eval_search_engine, eval_nouns = None, None, None
     eval_dataset, eval_search_engine, eval_nouns = None, None, None
     if args.eval:
         # Evaluate on dev data
