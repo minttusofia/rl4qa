@@ -16,6 +16,21 @@ def format_run_id(args):
     dataset_sizes = ('' if args.num_items_train is None else '-train{}'.format(args.num_items_train)
                                                              + dev_sizes)
     baseline_str = '' if args.baseline is None else '-{}bl'.format(args.baseline)
+
+    state_str = ''
+    if args.qtype_in_state:
+        state_str += 'q'
+    if args.subj0_in_state:
+        state_str += '0'
+    if args.a_t_in_state:
+        state_str += 'a'
+    if args.subj_prev_in_state:
+        state_str += 'p'
+    if args.d_t_in_state:
+        state_str += 'd'
+    if args.subj_t_in_state:
+        state_str += 's'
+
     if args.random_agent:
         run_id = ('random-'
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
@@ -28,6 +43,7 @@ def format_run_id(args):
         run_id = ('-'.join(['l{}'.format(layer_size) for layer_size in args.h_sizes])
                   + '-ew{}-init{}'.format(args.entropy_w, args.num_init_random_steps)
                   + '-g{}-lr{}-uf{}'.format(args.gamma, args.lr, args.update_freq)
+                  + '-s_{}'.format(state_str)
                   + '-r' + '-'.join(str(r) for r in [args.default_r, args.found_candidate_r,
                                                      args.penalty, args.success_r])
                   + '{}'.format(baseline_str)

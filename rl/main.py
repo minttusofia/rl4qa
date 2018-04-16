@@ -59,14 +59,29 @@ def check_answer(answer, question, incorrect_answers_this_episode, e, corrects, 
     return reward, incorrect_answers_this_episode, corrects, incorrects
 
 
-def embed_state(args, embs, subj0=None, a_t=None, subj_prev=None, d_t=None, subj_t=None,
-                qtype=None, initial_state=False):
+def embed_state(args, embs, subj0=None, a_t=None, subj_prev=None, d_t=None, subj_t=None, qtype=None,
+                initial_state=False, actions=None, qtype_order=None):
     """Construct state according to in_state flags and embed with GloVe."""
     s = []
+    if args.one_hot_states:
+        # Only actions and query types have scalable one-hot encodings
+        if args.a_t_in_state:
+            one_hot_a_t = np.zeros(len(actions))
+            one_hot_a_t[a_t] = 1.
+            s = np.concatenate([s, one_hot_a_t], axis=0)
+        if args.qtype_in_state:
+            one_hot_qtype = np.zeros(len(qtype_order))
+            one_hot_qtype[qtype_order[qtype]] = 1.
+            s = np.concatenate([s, one_hot_qtype], axis=0)
+        if args.verbose_embs:
+            print(actions[a_t], qtype)
+            print(s)
+        return s
+
     if args.subj0_in_state:
         s.append(subj0)
 
-    prev_elems = [a_t, subj_prev, d_t]
+    prev_elems = [actions[a_t] if a_t is not None else None, subj_prev, d_t]
     prev_elems_included = [args.a_t_in_state, args.subj_prev_in_state, args.d_t_in_state]
     for elem in range(len(prev_elems)):
         if prev_elems_included[elem]:
@@ -78,6 +93,8 @@ def embed_state(args, embs, subj0=None, a_t=None, subj_prev=None, d_t=None, subj
         s.append(subj0 if initial_state else subj_t)
     if args.qtype_in_state:
         s.append(qtype.replace('_', ' '))
+    if args.verbose_embs:
+        print(s)
     return embs.embed_state(s, verbose=args.verbose_embs)
 
 
@@ -153,7 +170,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     full_eval_freq = 50000
     checkpoint_freq = 500
     emb_dim = 50
-    conf_threshold = None  # args.conf_threshold if args.reader == 'fastqa' else None
+    conf_threshold = None
+    # Ensure consistent one-hot indexing of WikiHop relation types
+    qtype_order = json.load(open('rl/qtype_ordering.json')) if args.one_hot_states else None
 
     if args.run_id is not None:
         run_id = format_run_id(args)
@@ -177,11 +196,15 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         update_baseline = tf.assign(baseline_r,
                                     (new_reward + (current_e - 1) * baseline_r)/current_e)
 
-    num_state_parts = sum([args.subj0_in_state, args.a_t_in_state, args.subj_prev_in_state,
-                           args.d_t_in_state, args.subj_t_in_state, args.qtype_in_state])
     # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
     #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim, TODO
-    s_size = num_state_parts * emb_dim
+    if args.one_hot_states:
+        s_size = len(actions) * args.a_t_in_state + len(qtype_order) * args.qtype_in_state
+    else:
+        s_size = (sum([args.subj0_in_state, args.a_t_in_state, args.subj_prev_in_state,
+                       args.d_t_in_state, args.subj_t_in_state, args.qtype_in_state])
+                  * emb_dim)
+    print('s_size', s_size)
     a_size = len(actions)
 
     if agent is None:
@@ -233,7 +256,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             print(question.id, 'has no question subject')
             continue
         # First action taken with partial information: no a_t-1, subj_t-1, d_t-1
-        s0 = embed_state(args, embs, subj0=subj0, qtype=q_type, initial_state=True)
+        s0 = embed_state(args, embs, subj0=subj0, qtype=q_type, initial_state=True,
+                         actions=actions, qtype_order=qtype_order)
         state_history = [s0]  # used for backtracking
         subj_history = [subj0]
 
@@ -320,7 +344,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                              incorrects, t == max_queries - 1, args.default_r,
                              args.found_candidate_r, args.penalty, args.success_r, verbose))
 
-            s_t = embed_state(args, embs, subj0, actions[a_t], subj_prev, d_t, subj_t, q_type)
+            s_t = embed_state(args, embs, subj0, a_t, subj_prev, d_t, subj_t, q_type,
+                              actions=actions, qtype_order=qtype_order)
             state_history.append(s_t)
             subj_history.append(subj_t)
             subj_prev = subj_t
@@ -555,6 +580,8 @@ def parse_args():
                         help='If True (default), include previous document in RL input state.')
     parser.add_argument('--no_subj_t_in_s', dest='subj_t_in_state', action='store_false',
                         help='If True (default), include next subject in RL input state.')
+    parser.add_argument('--one_hot_states', nargs='?', const=True, default=False, type=bool,
+                        help='If True, use one-hot encoding of state elements instead of GloVe.')
 
     parser.add_argument('--hidden_sizes', dest='h_sizes', nargs='+', type=int, default=[32],
                         help='List denoting the sizes of hidden layers of the network.')

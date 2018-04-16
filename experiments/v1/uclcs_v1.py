@@ -24,7 +24,7 @@ def to_cmd(c, dirname, run_id):
               '{} {} --entropy_w {} --num_init_random_steps {} ' \
               '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
               '--qtype all --actions all-30 --verbose 0 --verbose_weights --seed {} ' \
-              '--hidden_sizes {} --reader {} ' \
+              '--hidden_sizes {} --reader {} {} {} {} {} ' \
               '--run_id {} --num_items_train {} --num_items_eval 500 --redis_host ' \
               'cannon.cs.ucl.ac.uk' \
               ''.format(dirname, c['lr'], c['gamma'], c['update_freq'],
@@ -32,6 +32,8 @@ def to_cmd(c, dirname, run_id):
                         c['entropy_w'], c['num_init_random_steps'],
                         c['default_r'], c['found_candidate_r'], c['penalty'], c['success_r'],
                         c['seed'], ' '.join(c['hidden_sizes']), c['reader'],
+                        c['qtype_in_s'], c['subj0_in_s'], c['a_t_in_s'], c['subj_prev_in_s'],
+                        c['d_t_in_s'], c['subj_t_in_s'],
                         run_id, c['num_items_train'], c['num_items_eval'])
     return command
 
@@ -54,6 +56,13 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.found_candidate_r = c['found_candidate_r']
     args.penalty = c['penalty']
     args.success_r = c['success_r']
+
+    args.qtype_in_state = c['qtype_in_s'] != '--no_qtype_in_s'
+    args.subj0_in_state = c['subj0_in_s'] != '--no_subj0_in_s'
+    args.a_t_in_state = c['a_t_in_s'] != '--no_a_t_in_s'
+    args.subj_prev_in_state = c['subj_prev_in_s'] != '--no_subj_prev_in_s'
+    args.d_t_in_state = c['d_t_in_s'] != '--no_d_t_in_s'
+    args.subj_t_in_state = ['subj_t_in_s'] != '--no_subj_t_in_s'
 
     args.seed = c['seed']
     args.h_sizes = c['hidden_sizes']
@@ -105,7 +114,13 @@ def main(argv):
         entropy_w=[0.001],
         backtrack=[''],
         baseline=[''],
-        reader=['fastqa']
+        reader=['fastqa'],
+        qtype_in_s=[''],
+        subj0_in_s=[''],
+        a_t_in_s=[''],
+        subj_prev_in_s=[''],
+        d_t_in_s=[''],
+        subj_t_in_s=['']
     )
 
     hyperparameters_space_1 = dict(
@@ -194,12 +209,21 @@ def main(argv):
         num_items_train=[30000],
     )
 
+    state_parts_experiment = dict(
+        qtype_in_s=['', '--no_qtype_in_s'],
+        subj0_in_s=['', '--no_subj0_in_s'],
+        a_t_in_s=['', '--no_a_t_in_s'],
+        subj_prev_in_s=['', '--no_subj_prev_in_s'],
+        d_t_in_s=['', '--no_d_t_in_s'],
+        subj_t_in_s=['', '--no_subj_t_in_s']
+    )
+
     dirname = args.dirname
     run_id_base = args.run_id_base
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(hyperparameters_space_10)
+    current_experiment.update(state_parts_experiment)
     configurations = list(cartesian_product(current_experiment))
 
     path = './rl/logs/'
