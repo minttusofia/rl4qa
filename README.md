@@ -2,7 +2,6 @@
 UCL MEng project
 
 ### Structure
-- `/allennlp`: first experiment — applying AllenNLP PyTorch implementation of BiDAF to WikiHop
 - `/baselines`: template baselines for WikiHop QA
 - `/data` (untracked): location for WikiHop and GloVe embeddings
 - `/experiments`: defines jobs to be submitted to the UCL CS cluster
