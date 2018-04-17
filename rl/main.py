@@ -263,6 +263,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         state_history = [s0]  # used for backtracking
         subj_history = [subj0]
 
+        a_t_prev = None
+        subj_prev_prev = None
+        d_t = None
         s_prev = s0
         subj_prev = subj0
         ep_reward = 0
@@ -318,8 +321,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                     actions[a_t], subj_prev, search_engine, question, nouns, queries_asked,
                     verbose)
                 if top_idx is None:  # subject has been reset
-                    s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev],
-                                                                       verbose=args.verbose_embs)
+                    s_prev = embed_state(args, embs, subj0, a_t_prev, subj_prev_prev, d_t,
+                                         subj_prev, q_type, actions=actions,
+                                         qtype_order=qtype_order)
             verbose_print(3, args.verbose, '   0.4f' % (a_distr[0, a_t]), end='')
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
@@ -350,6 +354,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                               actions=actions, qtype_order=qtype_order)
             state_history.append(s_t)
             subj_history.append(subj_t)
+            subj_prev_prev = subj_prev
+            a_t_prev = a_t
             subj_prev = subj_t
             num_actions_taken += 1
 
