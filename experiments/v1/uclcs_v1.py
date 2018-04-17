@@ -24,7 +24,8 @@ def to_cmd(c, dirname, run_id):
               '{} {} --entropy_w {} --num_init_random_steps {} ' \
               '--default_r {} --found_candidate_r {} --penalty {} --success_r {} ' \
               '--qtype all --actions all-30 --verbose 0 --verbose_weights --seed {} ' \
-              '--hidden_sizes {} --reader {} {} {} {} {} ' \
+              '--hidden_sizes {} --reader {} ' \
+              '{} {} {} {} {} {} ' \
               '--run_id {} --num_items_train {} --num_items_eval 500 --redis_host ' \
               'cannon.cs.ucl.ac.uk' \
               ''.format(dirname, c['lr'], c['gamma'], c['update_freq'],
@@ -62,7 +63,7 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.a_t_in_state = c['a_t_in_s'] != '--no_a_t_in_s'
     args.subj_prev_in_state = c['subj_prev_in_s'] != '--no_subj_prev_in_s'
     args.d_t_in_state = c['d_t_in_s'] != '--no_d_t_in_s'
-    args.subj_t_in_state = ['subj_t_in_s'] != '--no_subj_t_in_s'
+    args.subj_t_in_state = c['subj_t_in_s'] != '--no_subj_t_in_s'
 
     args.seed = c['seed']
     args.h_sizes = c['hidden_sizes']
@@ -210,6 +211,8 @@ def main(argv):
     )
 
     state_parts_experiment = dict(
+        baseline=['--baseline=mean'],
+        gamma=[0.6],
         qtype_in_s=['', '--no_qtype_in_s'],
         subj0_in_s=['', '--no_subj0_in_s'],
         a_t_in_s=['', '--no_a_t_in_s'],
