@@ -240,128 +240,6 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
     return correct_answers, incorrect_answers, counts_by_type
 
 
-def parallel_eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
-                                   num_items_to_eval, max_num_queries, confidence_threshold,
-                                   penalize_long_answers, verbose=False):
-    """Accelerate evaluation by querying RC model with multiple questions in parallel."""
-    correct_answers = collections.defaultdict(float)
-    incorrect_answers = collections.defaultdict(float)
-    counts_by_type = collections.defaultdict(float)
-    batch_size = 5
-
-    for batch in range(int(math.ceil(num_items_to_eval/batch_size))):  # split data into batches
-        print('Evaluating batch', batch)
-        num_items_in_batch = batch_size
-        if batch_size * (batch + 1) > len(dataset):
-            num_items_in_batch -= batch_size * (batch + 1) - len(dataset)
-        found_candidate = [False for _ in range(num_items_in_batch)]
-        found_correct_answer = [False for _ in range(num_items_in_batch)]
-        seen_incorrect_answer_this_episode = [False for _ in range(num_items_in_batch)]
-        incorrect_answers_this_episode = [[] for _ in range(num_items_in_batch)]
-        # Store past queries asked -> documents retrieved mappings
-        queries_asked = collections.defaultdict(set)
-
-        query_types = []
-        prev_subj = []
-        # initialise
-        for item in range(num_items_in_batch):
-            print('Initialising item', item, '/', num_items_in_batch)
-            question = Question(dataset[batch_size * batch + item])
-            query_type, subject = (question.query.split()[0],
-                                   ' '.join(question.query.split()[1:]))
-            counts_by_type[query_type] += 1.0
-            if verbose:
-                print(item, ':', question.query)
-            query_types.append(query_type)
-            prev_subj.append(subject.lower())
-        for q in range(max_num_queries):  # for each time step
-            print('\nTime step', q)
-            batch_queries = []
-            batch_supports = []
-            batch_ids = []
-            batch_top_idxs = []
-            for item in range(num_items_in_batch):  # Prepare query for each question item in batch
-                if found_correct_answer[item]:
-                    continue
-                question = Question(dataset[batch_size * batch + item])
-                top_doc_found = False
-                while not top_doc_found:
-                    query = templates[query_types[item]] + ' ' + prev_subj[item]
-                    top_idxs = search_engine.rank_docs(question.id, query,
-                                                       topk=len(question.supports))
-                    # Iterate over ranking backwards (last document is best match)
-                    for d in range(len(top_idxs)-1, -1, -1):
-                        if top_idxs[d] not in queries_asked[(item, query)]:
-                            top_idx = top_idxs[d]
-                            top_doc_found = True
-                            break
-
-                    # If question has been asked from all documents, pick a new subject from top
-                    # doc at random to avoid loops
-                    if not top_doc_found:
-                        top_idx = top_idxs[-1]
-                        prev_subj[item] = (nouns[question.id][top_idx]
-                                                [randint(0, len(nouns[question.id][top_idx])-1)]
-                                           .lower())
-                        print('picked', prev_subj[item], 'at random')
-                queries_asked[(item, query)].add(top_idx)
-                batch_queries.append(query)
-                batch_supports.append(question.supports[top_idx])
-                batch_ids.append(question.id)
-                batch_top_idxs.append(top_idx)
-                if verbose:
-                    print('   ', query, '\t->', top_idx, '\n\t', top_idxs)
-
-            # Send queries to RC module
-            if redis_server is None:
-                rc_answers = get_rc_answers(reader, batch_queries, batch_supports)
-            else:
-                rc_answers, _ = get_cached_rc_answers(reader, batch_queries, batch_supports,
-                                                      redis_server, batch_ids, top_idxs)
-
-            for item in range(num_items_in_batch):  # generate next query
-                # TODO: remove found_candidate to match eval_single_templates
-                found_candidate[item] = False
-                answer = rc_answers[item]
-                q_i = batch * batch_size + item
-                question = Question(dataset[q_i])
-                score = answer.score
-                if penalize_long_answers:
-                    score *= discount_by_answer_length(answer)
-                print(item + 1, '- answer (score %0.4f):\t' % score, answer.text)
-                if score > confidence_threshold:
-                    prev_subj[item] = answer.text.lower()
-                    if verbose:
-                        print('\t->', prev_subj[item], '(', score, ')')
-                    found_candidate[item] = True
-                    # If current answer is an answer candidate, submit it
-                    if answer.text.lower() in question.candidates_lower:
-                        if answer.text.lower() == question.answer.lower():
-                            print(q_i, ': Found correct answer', answer.text)
-                            correct_answers[query_type] += 1
-                            break
-                        # If the current answer is not correct and we have not submitted it before
-                        elif answer.text.lower() not in incorrect_answers_this_episode[item]:
-                            print(q_i, ': Found incorrect answer candidate', answer.text)
-                            incorrect_answers_this_episode.append(answer.text.lower())
-                            if not seen_incorrect_answer_this_episode[item]:
-                                incorrect_answers[query_type] += 1
-                                seen_incorrect_answer_this_episode[item] = True
-                        else:  # We have already seen this incorrect candidate
-                            found_candidate[item] = False
-                if not found_candidate[item]:
-                    # Pick a noun phrase at random from top document
-                    rand_draw = randint(0, len(nouns[question.id][batch_top_idxs[item]])-1)
-                    prev_subj[item] = nouns[question.id][batch_top_idxs[item]][rand_draw]
-                    if type(prev_subj[item]) == list:
-                        prev_subj[item] = prev_subj[item][0].lower()
-                    else:
-                        prev_subj[item] = prev_subj[item].lower()
-                    print('     random draw:', prev_subj[item])
-
-    return correct_answers, incorrect_answers, counts_by_type
-
-
 def format_csv_path(data_path, len_dataset, max_num_queries, confidence_threshold, reader,
                     str_noun_parser_class, templates_from_file, qtypes_from_file):
     csv_path = 'baselines/data'
@@ -417,7 +295,6 @@ def print_eval_as_table(correct_answers, incorrect_answers, counts_by_type):
 
 
 def eval_templates():
-    """Shared setup for parallel and sequential evaluation."""
     parser = argparse.ArgumentParser()
     parser.add_argument('--spacy', nargs='?', const=True, default=False, type=bool,
                         help='If True, use Spacy to parse nouns. If False, use NLTK (default).')
@@ -437,8 +314,6 @@ def eval_templates():
                         help='WikiHop version to use: one of {0, 1.1}.')
     parser.add_argument('--dev', nargs='?', const=True, default=False,
                         help='If True, evaluate templates on dev data instead of train.')
-    parser.add_argument('--parallel', nargs='?', const=True, default=False, type=bool,
-                        help='If True, evaluate multiple questions in parallel.')
 
     parser.add_argument('--redis_host', type=str, default='localhost',
                         help='Host of running redis instance (e.g. localhost, cannon).')
@@ -470,7 +345,6 @@ def eval_templates():
             redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=0)
         elif args.reader == 'bidaf':
             redis_server = redis.StrictRedis(host=args.redis_host, port=6379, db=1)
-    parallel_eval = args.parallel
 
     print('Initialising...')
     with open(data_path) as dataset_file:
@@ -552,16 +426,10 @@ def eval_templates():
 
     if evaluate_nouns:
         eval_nouns(dataset, nouns)
-    if parallel_eval:
-        correct_answers, incorrect_answers, counts_by_type = (
-            parallel_eval_single_templates(templates, search_engine, dataset, nouns, reader,
-                                           redis_server, num_items_to_eval, max_num_queries,
-                                           confidence_threshold, penalize_long_answers, verbose))
-    else:
-        correct_answers, incorrect_answers, counts_by_type = (
-            eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
-                                  num_items_to_eval, max_num_queries, confidence_threshold,
-                                  args.question_marks, csv_path, penalize_long_answers, verbose))
+    correct_answers, incorrect_answers, counts_by_type = (
+        eval_single_templates(templates, search_engine, dataset, nouns, reader, redis_server,
+                              num_items_to_eval, max_num_queries, confidence_threshold,
+                              args.question_marks, csv_path, penalize_long_answers, verbose))
 
     print('Correct guesses', dict(correct_answers))
     print('Incorrect guesses', dict(incorrect_answers))

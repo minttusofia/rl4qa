@@ -318,9 +318,11 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                     actions[a_t], subj_prev, search_engine, question, nouns, queries_asked,
                     verbose)
                 if top_idx is None:  # subject has been reset
-                    s_prev[4 * emb_dim:5 * emb_dim] = embs.embed_state([subj_prev],
-                                                                       verbose=args.verbose_embs)
-            verbose_print(3, args.verbose, '   0.4f' % (a_distr[0, a_t]), end='')
+                    s_prev = embed_state(args, embs, subj0, a_t_prev, subj_prev_prev, d_t,
+                                         subj_prev, q_type, actions=actions,
+                                         qtype_order=qtype_order)
+            verbose_print(3, args.verbose, '   %0.4f' % (a_distr[0][a_t]), end='')
+
             queries_asked[query_t].append(top_idx)
             d_t = question.supports[top_idx]
 
@@ -653,7 +655,8 @@ def clean_missing_subjects(dataset):
 def initialise(args, dev=False):
     # If loading trained model from checkpoint, don't initialise train data
     dataset, search_engine, nouns = None, None, None
-    if args.model_from_checkpoint is None or dev:  # don't load seach engine or nouns for train data
+    # If False, don't load seach engine or nouns for train data
+    if dev or (not dev and args.model_from_checkpoint is None and args.num_items_train > 0):
         print('\nInitialising dev data...' if dev else '\nInitialising train data...')
         subset_id, data_path, index_filename, nouns_path = format_paths(args, dev)
         with open(data_path) as dataset_file:
