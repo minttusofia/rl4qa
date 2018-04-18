@@ -84,11 +84,13 @@ def majority_qtype(data, actions):
         if qtype not in top_action:
             top_action[qtype] = best_action
 
+    top_action['default'] = best_action
+
     return top_action
 
 
 def main():
-    reader = 'bidaf'
+    reader = 'fastqa'
     data_size = 300000
     actions_file = 'template_list_30'
     paths = ['baselines/data/v1.1/train_ids__{}_25_None_{}_nltk_{}.csv'.format(data_size, reader,
