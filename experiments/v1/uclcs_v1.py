@@ -64,6 +64,7 @@ def to_logfile(c, path, dirname, run_id, qtype='all', actions='all-30'):
     args.subj_prev_in_state = c['subj_prev_in_s'] != '--no_subj_prev_in_s'
     args.d_t_in_state = c['d_t_in_s'] != '--no_d_t_in_s'
     args.subj_t_in_state = c['subj_t_in_s'] != '--no_subj_t_in_s'
+    args.one_hot_states = c['one_hot_states'] == '--one_hot-states' 
 
     args.seed = c['seed']
     args.h_sizes = c['hidden_sizes']
@@ -121,7 +122,8 @@ def main(argv):
         a_t_in_s=[''],
         subj_prev_in_s=[''],
         d_t_in_s=[''],
-        subj_t_in_s=['']
+        subj_t_in_s=[''],
+        one_hot_states=['']
     )
 
     hyperparameters_space_1 = dict(
@@ -221,12 +223,19 @@ def main(argv):
         subj_t_in_s=['', '--no_subj_t_in_s']
     )
 
+    long_training_experiment = dict(
+        baseline=['--baseline=mean'],
+        gamma=[0.6],
+        reader=['fastqa', 'bidaf'],
+        num_items_train=[1000000]
+    )
+
     dirname = args.dirname
     run_id_base = args.run_id_base
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(state_parts_experiment)
+    current_experiment.update(long_training_experiment)
     configurations = list(cartesian_product(current_experiment))
 
     path = './rl/logs/'
