@@ -230,12 +230,25 @@ def main(argv):
         num_items_train=[1000000]
     )
 
+    deep_experiment = dict(
+        baseline=['--baseline=mean'],
+        gamma=[0.6],
+        reader=['fastqa', 'bidaf'],
+        num_items_train=[1000000],
+        hidden_sizes=[['64','64','64']],
+        subj0_in_s=['', '--no_subj0_in_s'],
+        a_t_in_s=['', '--no_a_t_in_s'],
+        subj_prev_in_s=['', '--no_subj_prev_in_s'],
+        d_t_in_s=['', '--no_d_t_in_s'],
+        subj_t_in_s=['', '--no_subj_t_in_s']
+    )
+
     dirname = args.dirname
     run_id_base = args.run_id_base
 
     current_experiment = dict()
     current_experiment.update(default_hyperparameters)
-    current_experiment.update(long_training_experiment)
+    current_experiment.update(deep_experiment)
     configurations = list(cartesian_product(current_experiment))
 
     path = './rl/logs/'
@@ -282,7 +295,7 @@ def main(argv):
 #$ -pe smp 2
 #$ -R y
 #$ -l h_vmem=10G,tmem=10G
-#$ -l h_rt=99:00:00
+#$ -l h_rt=160:00:00
 
 cd /home/malakuij/rl4qa
 
