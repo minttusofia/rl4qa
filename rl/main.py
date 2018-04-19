@@ -263,6 +263,9 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         state_history = [s0]  # used for backtracking
         subj_history = [subj0]
 
+        a_t_prev = None
+        subj_prev_prev = None
+        d_t = None
         s_prev = s0
         subj_prev = subj0
         ep_reward = 0
@@ -352,6 +355,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                               actions=actions, qtype_order=qtype_order)
             state_history.append(s_t)
             subj_history.append(subj_t)
+            subj_prev_prev = subj_prev
+            a_t_prev = a_t
             subj_prev = subj_t
             num_actions_taken += 1
 
