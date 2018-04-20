@@ -16,7 +16,6 @@ def print_colored_doc(doc, query=None, nouns=None, query_color='blue', noun_colo
     if query is None and nouns is None:
         print(doc)
     else:
-        # TODO: Not all docs have separated punctuation
         # doc = doc.replace('. ', ' . ') -> doesn't work on already separated punctuation
         # doc = doc.replace(', ', ' , ')
         if query is None:

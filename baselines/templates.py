@@ -24,7 +24,6 @@ from shared.utils import trim_index, form_query
 
 def discount_by_answer_length(answer):
     if len(answer.text.split()) > 3:
-        # TODO: try more sophisticated discounts
         return 3.0/len(answer.text.split())
     return 1.0
 

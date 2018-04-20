@@ -183,7 +183,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
             if path is not None and not os.path.exists(os.path.dirname(path)):
                 os.makedirs(os.path.dirname(path))
 
-    # TODO: should this not be run for existing agent?
     if existing_session is None:
         tf.reset_default_graph()
         tf.set_random_seed(args.seed)
@@ -196,8 +195,8 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
         update_baseline = tf.assign(baseline_r,
                                     (new_reward + (current_e - 1) * baseline_r)/current_e)
 
-    # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type,  history
-    #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim, TODO
+    # State: subj0,  a_t-1,     subj_t-1, d_t-1,   ans_t-1, q_type
+    #        emb_dim, emb_dim, emb_dim,  emb_dim, emb_dim,  emb_dim
     if args.one_hot_states:
         s_size = len(actions) * args.a_t_in_state + len(qtype_order) * args.qtype_in_state
     else:
@@ -372,14 +371,12 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
                 verbose_print(2, verbose, 'Received reward', r)
             ep_length = t
             if r == args.success_r:
-                # TODO: collect aggregate action history data
                 verbose_print(1, verbose, '\tAction history:', ep_history[:, 1])
                 break
             elif r == args.penalty:
                 verbose_print(2, verbose, '( Correct answer', question.answer, ')')
 
         if train:
-            # TODO: baseline when non-terminal rewards != 0
             if args.baseline == 'mean':
                 raw_reward = ep_history[-1, 2]
                 baseline_reward = sess.run(baseline_r)
@@ -510,7 +507,6 @@ def run_agent(dataset, search_engine, nouns, reader, redis_server, embs, args,
     if existing_session is None:
         sess.close()
 
-    # TODO: save activations of hidden layers
     if args.save_embs:
         embs.save_history_to_csv()
     if num_episodes > 0:

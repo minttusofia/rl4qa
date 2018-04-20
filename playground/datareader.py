@@ -78,7 +78,6 @@ def show_connections_to_correct_answer(question, noun_parser):
     """
     subject = ' '.join(question.query.split()[1:])
     answer = question.answer
-    # TODO: consider non-contiguous mentions of subject (e.g. firstname middlename lastname)
     # Assume nouns have to appear in same sentence
     all_sentences = []
     print('Showing connections from', subject, 'to', answer)
