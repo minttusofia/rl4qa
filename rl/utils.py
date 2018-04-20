@@ -30,6 +30,8 @@ def format_run_id(args):
         state_str += 'd'
     if args.subj_t_in_state:
         state_str += 's'
+    if args.one_hot_states:
+        state_str += '1h'
 
     if args.random_agent:
         run_id = ('random-'

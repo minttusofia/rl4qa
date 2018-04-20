@@ -163,7 +163,7 @@ def eval_single_templates(templates, search_engine, dataset, nouns, reader,
                                       [top_idx]
                                       [randint(0, len(nouns[question.id][top_idx])-1)])
                     # If all nouns from current doc have been asked from all docs, pick another doc
-                    if len(nouns_tried) >= len(nouns[question.id][top_idx]):
+                    if len(nouns_tried) >= len(set(nouns[question.id][top_idx])):
                         prev_top_idx = top_idx
                         docs = list(range(len(question.supports)))
                         docs.pop(top_idx)
