@@ -17,8 +17,7 @@ documents for that question. The index is kept in memory.
 ### To run
 
 #### Playground
-1. Install jack (see https://github.com/uclmr/jack) and download a pretrained FastQA (default in
-_Playground_, _Templates_ and _Reinforce agent_) or BiDAF reader.
+1. Install jack (see https://github.com/uclmr/jack).
 2. Place WikiHop v1.1 (`train.json`, `dev.json`) under `/data/wikihop/v1.1/`.
 3. Create an index by running `python -m ir.search_engine` from the top 
 level directory (this will take a while). Optionally, to only use a subset of data for faster 

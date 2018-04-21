@@ -8,7 +8,7 @@ class Agent:
 
 
 class RandomAgent(Agent):
-    """Agent th"""
+    """Agent that picks actions in the action space uniformly at random."""
     def __init__(self, state_shape, action_shape):
         super(RandomAgent, self).__init__(state_shape)
         self.output = [tf.constant(np.ones(action_shape)/action_shape)]
